@@ -1,0 +1,118 @@
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
+
+from models.schemas import Bookmark, BookmarkCategory, BookmarkMoveRequest
+
+router = APIRouter(prefix="/api/bookmarks", tags=["bookmarks"])
+
+
+def _bm():
+    from main import app_state
+    return app_state.bookmark_manager
+
+
+# ── Bookmarks ─────────────────────────────────────────────
+
+@router.get("", response_model=dict)
+async def list_bookmarks():
+    bm = _bm()
+    return {
+        "categories": [c.model_dump() for c in bm.list_categories()],
+        "bookmarks": [b.model_dump() for b in bm.list_bookmarks()],
+    }
+
+
+@router.post("", response_model=Bookmark)
+async def create_bookmark(bookmark: Bookmark):
+    bm = _bm()
+    return bm.create_bookmark(
+        name=bookmark.name,
+        lat=bookmark.lat,
+        lng=bookmark.lng,
+        address=bookmark.address,
+        note=bookmark.note,
+        category_id=bookmark.category_id,
+    )
+
+
+@router.put("/{bookmark_id}", response_model=Bookmark)
+async def update_bookmark(bookmark_id: str, bookmark: Bookmark):
+    bm = _bm()
+    updated = bm.update_bookmark(
+        bookmark_id,
+        name=bookmark.name,
+        lat=bookmark.lat,
+        lng=bookmark.lng,
+        address=bookmark.address,
+        note=bookmark.note,
+        category_id=bookmark.category_id,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Bookmark not found")
+    return updated
+
+
+@router.delete("/{bookmark_id}")
+async def delete_bookmark(bookmark_id: str):
+    bm = _bm()
+    if not bm.delete_bookmark(bookmark_id):
+        raise HTTPException(status_code=404, detail="Bookmark not found")
+    return {"status": "deleted"}
+
+
+@router.post("/move")
+async def move_bookmarks(req: BookmarkMoveRequest):
+    bm = _bm()
+    count = bm.move_bookmarks(req.bookmark_ids, req.target_category_id)
+    return {"moved": count}
+
+
+# ── Categories ────────────────────────────────────────────
+
+@router.get("/categories", response_model=list[BookmarkCategory])
+async def list_categories():
+    bm = _bm()
+    return bm.list_categories()
+
+
+@router.post("/categories", response_model=BookmarkCategory)
+async def create_category(cat: BookmarkCategory):
+    bm = _bm()
+    return bm.create_category(name=cat.name, color=cat.color)
+
+
+@router.put("/categories/{cat_id}", response_model=BookmarkCategory)
+async def update_category(cat_id: str, cat: BookmarkCategory):
+    bm = _bm()
+    updated = bm.update_category(cat_id, name=cat.name, color=cat.color)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Category not found")
+    return updated
+
+
+@router.delete("/categories/{cat_id}")
+async def delete_category(cat_id: str):
+    bm = _bm()
+    if cat_id == "default":
+        raise HTTPException(status_code=400, detail="Cannot delete default category")
+    if not bm.delete_category(cat_id):
+        raise HTTPException(status_code=404, detail="Category not found")
+    return {"status": "deleted"}
+
+
+# ── Import / Export ───────────────────────────────────────
+
+@router.get("/export")
+async def export_bookmarks():
+    bm = _bm()
+    data = bm.export_json()
+    return Response(content=data, media_type="application/json",
+                    headers={"Content-Disposition": 'attachment; filename="bookmarks.json"'})
+
+
+@router.post("/import")
+async def import_bookmarks(data: dict):
+    import json
+    bm = _bm()
+    count = bm.import_json(json.dumps(data))
+    return {"imported": count}

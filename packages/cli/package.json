@@ -1,0 +1,23 @@
+{
+  "name": "@ios-locctl/cli",
+  "version": "1.0.0",
+  "description": "iOS location control CLI",
+  "main": "index.js",
+  "scripts": {
+    "devices": "ts-node src/cli.ts devices",
+    "jump": "ts-node src/cli.ts jump",
+    "move": "ts-node src/cli.ts move",
+    "clear": "ts-node src/cli.ts clear",
+    "distance": "ts-node src/cli.ts distance",
+    "status": "ts-node src/cli.ts status"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.2"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "ios-locctl",
+  "version": "1.0.0",
+  "private": true,
+  "description": "iOS Virtual Location Simulator - Monorepo",
+  "scripts": {
+    "setup": "pnpm install -r && pip3 install -r packages/backend/requirements.txt",
+    "dev": "bash scripts/dev.sh",
+    "dev:fe": "pnpm --filter @ios-locctl/frontend dev",
+    "dev:be": "bash scripts/start-backend.sh",
+    "build:fe": "pnpm --filter @ios-locctl/frontend build",
+    "build:be": "cd packages/backend && python -m PyInstaller ios-locctl-backend.spec --noconfirm",
+    "devices": "pnpm --filter @ios-locctl/cli devices",
+    "jump": "pnpm --filter @ios-locctl/cli jump",
+    "move": "pnpm --filter @ios-locctl/cli move",
+    "clear": "pnpm --filter @ios-locctl/cli clear",
+    "distance": "pnpm --filter @ios-locctl/cli distance",
+    "status": "pnpm --filter @ios-locctl/cli status"
+  },
+  "keywords": [
+    "ios",
+    "gps",
+    "location",
+    "simulation",
+    "pymobiledevice3"
+  ],
+  "author": "mars",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
