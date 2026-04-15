@@ -3,7 +3,13 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_DIR="$SCRIPT_DIR/../packages/backend"
-PYTHON3_PATH="$(which python3)"
+ROOT_DIR="$SCRIPT_DIR/.."
+PYTHON3_PATH="$ROOT_DIR/.venv/bin/python"
+
+if [ ! -x "$PYTHON3_PATH" ]; then
+    echo "Error: Python virtualenv not found. Run 'pnpm setup' first."
+    exit 1
+fi
 
 # Already root? Just run backend
 if [ "$EUID" -eq 0 ]; then

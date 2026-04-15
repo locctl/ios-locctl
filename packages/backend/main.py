@@ -151,25 +151,16 @@ async def _usbmux_presence_watchdog():
     * **Disappearance** — a UDID present in DeviceManager._connections that
       drops off the usbmux list for 2 consecutive polls is treated as USB
       unplug: disconnect, clear simulation_engine, broadcast device_disconnected.
-    * **Appearance** — a USB device showing up while we have no active
-      connection triggers an auto-connect + engine rebuild, broadcasting
-      device_reconnected when it succeeds. Failed attempts are throttled
-      (min 5 s between retries per UDID) so we don't spam connect() while
-      the device is still in the "Trust this computer?" dialog.
-
-    WiFi (Network) devices are skipped on both sides — those are covered by
-    the WiFi tunnel watchdog. Consecutive-miss debouncing protects against
-    usbmuxd re-enumeration hiccups.
+    WiFi (Network) devices are skipped — those are covered by the WiFi
+    tunnel watchdog. Consecutive-miss debouncing protects against usbmuxd
+    re-enumeration hiccups.
     """
     import asyncio
-    import time
     from pymobiledevice3.usbmux import list_devices
     from api.websocket import broadcast
 
     miss_counts: dict[str, int] = {}
     miss_threshold = 2
-    last_reconnect_attempt: dict[str, float] = {}
-    reconnect_cooldown = 5.0  # seconds between retry attempts per UDID
 
     while True:
         await asyncio.sleep(2.0)
@@ -218,41 +209,6 @@ async def _usbmux_presence_watchdog():
                     logger.exception("watchdog: broadcast (disconnected) failed")
                 continue  # skip appearance logic this tick
 
-            # --- Appearance (auto-reconnect) ---
-            # If nothing is connected but a USB device shows up, connect it.
-            if connected or not present_usb:
-                continue
-            if app_state.simulation_engine is not None:
-                continue  # already got one somehow
-
-            now = time.monotonic()
-            for udid in present_usb:
-                last = last_reconnect_attempt.get(udid, 0.0)
-                if now - last < reconnect_cooldown:
-                    continue
-                last_reconnect_attempt[udid] = now
-                logger.info("usbmux watchdog: new USB device %s detected, auto-reconnecting", udid)
-                try:
-                    await dm.connect(udid)
-                    await app_state.create_engine_for_device(udid)
-                    # Only broadcast success when an engine was actually built
-                    if app_state.simulation_engine is not None:
-                        try:
-                            pos = app_state.get_initial_position()
-                            await broadcast("device_reconnected", {
-                                "udid": udid,
-                                "restored_position": pos,
-                            })
-                        except Exception:
-                            logger.exception("watchdog: broadcast (reconnected) failed")
-                        logger.info("Auto-reconnect succeeded for %s", udid)
-                        last_reconnect_attempt.pop(udid, None)
-                        break  # connected one device, done for this tick
-                except Exception:
-                    logger.warning(
-                        "Auto-reconnect for %s failed (will retry in %.0fs): likely Trust pending",
-                        udid, reconnect_cooldown, exc_info=True,
-                    )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -263,19 +219,15 @@ async def _usbmux_presence_watchdog():
 async def lifespan(application: FastAPI):
     import asyncio
     # ── Startup ──
-    logger.info("Starting — scanning for devices…")
+    logger.info("Starting backend services…")
     try:
         devices = await app_state.device_manager.discover_devices()
         if devices:
-            target = devices[0]
-            logger.info("Found device %s (%s), auto-connecting…", target.name, target.udid)
-            await app_state.device_manager.connect(target.udid)
-            await app_state.create_engine_for_device(target.udid)
-            logger.info("Auto-connected to %s", target.udid)
+            logger.info("Discovered %d device(s) on startup; waiting for explicit connect", len(devices))
         else:
             logger.info("No iOS devices found on startup")
     except Exception:
-        logger.exception("Auto-connect on startup failed (device may need manual connect)")
+        logger.exception("Startup device scan failed")
 
     watchdog_task = asyncio.create_task(_usbmux_presence_watchdog())
 

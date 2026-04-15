@@ -23,11 +23,11 @@ router = APIRouter(prefix="/api/location", tags=["location"])
 
 
 async def _engine():
-    """Return the active SimulationEngine, lazily rebuilding it when the
-    device is reachable but the engine slot is empty. On the first attempt
-    we just rebuild the engine; if that fails we force a full disconnect +
-    reconnect + engine rebuild (covers the common iOS 17+ case where the
-    RSD tunnel is alive but the DVT channel has silently gone stale)."""
+    """Return the active SimulationEngine for an explicitly connected device.
+
+    We allow rebuilding the engine on top of an existing device session, but
+    never create a brand-new connection implicitly from a location endpoint.
+    """
     from main import app_state
     import logging as _logging
     _log = _logging.getLogger("ios-locctl")
@@ -37,60 +37,30 @@ async def _engine():
 
     dm = app_state.device_manager
 
-    # Pick a target UDID — already-connected first, then any discoverable device.
-    # usbmuxd can transiently return an empty list right after device re-enum,
-    # so retry up to 10× with 1s gap (matches GeoPort's get_devices_with_retry).
     target_udid = next(iter(dm._connections.keys()), None)
-    if target_udid is None:
-        import asyncio as _asyncio
-        for attempt in range(10):
-            try:
-                discovered = await dm.discover_devices()
-                if discovered:
-                    target_udid = discovered[0].udid
-                    if attempt > 0:
-                        _log.info("discover_devices returned device on attempt %d", attempt + 1)
-                    break
-            except Exception:
-                _log.exception("discover_devices failed during lazy rebuild (attempt %d)", attempt + 1)
-            await _asyncio.sleep(1.0)
-
     if target_udid is None:
         raise HTTPException(
             status_code=400,
-            detail={"code": "no_device", "message": "尚未連接任何 iOS 裝置,請先透過 USB 連線"},
+            detail={
+                "code": "no_device",
+                "message": "尚未連接任何 iOS 裝置,請先在裝置面板手動連線",
+            },
         )
 
-    # Attempt 1: rebuild engine on top of existing connection
-    _log.info("simulation_engine missing; attempt 1 (rebuild) for %s", target_udid)
+    _log.info("simulation_engine missing; rebuilding on active session for %s", target_udid)
     try:
         await app_state.create_engine_for_device(target_udid)
         if app_state.simulation_engine is not None:
-            _log.info("Engine rebuild succeeded on attempt 1")
+            _log.info("Engine rebuild succeeded")
             return app_state.simulation_engine
     except Exception:
-        _log.exception("Engine rebuild (attempt 1) failed for %s", target_udid)
-
-    # Attempt 2: hard reset — disconnect + reconnect + rebuild
-    _log.info("attempt 2 (hard reset) for %s", target_udid)
-    try:
-        try:
-            await dm.disconnect(target_udid)
-        except Exception:
-            _log.warning("disconnect during hard reset failed; proceeding", exc_info=True)
-        await dm.connect(target_udid)
-        await app_state.create_engine_for_device(target_udid)
-        if app_state.simulation_engine is not None:
-            _log.info("Engine rebuild succeeded on attempt 2")
-            return app_state.simulation_engine
-    except Exception:
-        _log.exception("Engine rebuild (attempt 2, hard reset) failed for %s", target_udid)
+        _log.exception("Engine rebuild failed for %s", target_udid)
 
     raise HTTPException(
-        status_code=400,
+        status_code=503,
         detail={
-            "code": "no_device",
-            "message": "裝置連線已失效,請嘗試重新插拔 USB 或重新啟動 ios-locctl(詳見 ~/.ios-locctl/logs/backend.log)",
+            "code": "engine_unavailable",
+            "message": "裝置已連線但模擬引擎不可用,請重新連線裝置後再試(詳見 ~/.ios-locctl/logs/backend.log)",
         },
     )
 

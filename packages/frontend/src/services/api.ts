@@ -31,7 +31,7 @@ const ERROR_I18N: Record<string, { zh: string; en: string }> = {
   repair_needs_usb: { zh: '重新配對需要 USB, 請先用線連接 iPhone', en: 'Re-pair needs USB, please connect the iPhone first' },
   usbmux_unavailable: { zh: '無法列出 USB 裝置,請確認驅動與 Apple Mobile Device Service 是否正常', en: 'Cannot list USB devices, check iTunes/Apple Mobile Device Service' },
   trust_failed: { zh: 'USB 信任失敗, 請在 iPhone 上點「信任」後再試', en: 'USB trust failed, tap Trust on the iPhone and retry' },
-  remote_pair_failed: { zh: 'RemotePairing 記錄重建失敗, 請以 sudo 重啟 ios-locctl', en: 'RemotePairing record rebuild failed, restart ios-locctl with sudo' },
+  remote_pair_failed: { zh: 'RemotePairing 記錄重建失敗', en: 'RemotePairing record rebuild failed' },
   device_lost: { zh: '裝置連線中斷(USB 拔除或 Tunnel 死亡),請重新插上 USB 後再操作', en: 'Device connection lost (USB unplugged or tunnel died), please reconnect USB and try again' },
   ios_unsupported: {
     zh: '裝置 iOS 版本過舊,ios-locctl 僅支援 iOS 17 以上。請升級 iOS 後再試。',
@@ -51,6 +51,7 @@ function formatError(detail: unknown, fallback: string): string {
   if (typeof detail === 'string') return detail
   if (detail && typeof detail === 'object') {
     const d = detail as { code?: string; message?: string }
+    if (d.code === 'remote_pair_failed' && d.message) return d.message
     if (d.code && ERROR_I18N[d.code]) return ERROR_I18N[d.code][currentLang()]
     if (d.message) return d.message
   }

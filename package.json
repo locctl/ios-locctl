@@ -4,7 +4,7 @@
   "private": true,
   "description": "iOS Virtual Location Simulator - Monorepo",
   "scripts": {
-    "setup": "pnpm install -r && pip3 install -r packages/backend/requirements.txt",
+    "setup": "pnpm install -r && bash scripts/setup-python.sh",
     "dev": "bash scripts/dev.sh",
     "dev:fe": "pnpm --filter @ios-locctl/frontend dev",
     "dev:be": "bash scripts/start-backend.sh",

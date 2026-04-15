@@ -396,10 +396,14 @@ const App: React.FC = () => {
             wifiIp: (d as any).wifi_ip,
           }))}
           isConnected={device.connectedDevice !== null}
-          onScan={() => { device.scan() }}
-          onSelect={(id: string) => {
+          onScan={() => {
+            sim.clearError()
+            return device.scan()
+          }}
+          onSelect={async (id: string) => {
+            sim.clearError()
             const dev = device.devices.find(d => d.udid === id)
-            device.connect(id, (dev as any)?.wifi_ip)
+            await device.connect(id, (dev as any)?.wifi_ip)
           }}
         />
         <ControlPanel

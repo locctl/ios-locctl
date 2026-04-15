@@ -44,18 +44,6 @@ export function useDevice(wsMessage?: WsMessage | null) {
       const active = list.find((d) => d.is_connected) ?? null
       if (active) {
         setConnectedDevice(active)
-      } else if (list.length === 1) {
-        // Auto-connect when exactly one device is found
-        const dev = list[0]
-        try {
-          await connectDevice(dev.udid, dev.wifi_ip)
-          const refreshed = await listDevices()
-          const rList: DeviceInfo[] = Array.isArray(refreshed) ? refreshed : []
-          setDevices(rList)
-          setConnectedDevice(rList.find((d) => d.udid === dev.udid) ?? dev)
-        } catch {
-          setConnectedDevice(null)
-        }
       } else {
         setConnectedDevice(null)
       }

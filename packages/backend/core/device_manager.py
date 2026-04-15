@@ -17,8 +17,12 @@ access DVT services.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import socket
+import sys
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Optional
@@ -31,6 +35,7 @@ from pymobiledevice3.services.dvt.instruments.location_simulation import Locatio
 from pymobiledevice3.services.simulate_location import DtSimulateLocation
 from pymobiledevice3.usbmux import list_devices
 
+from config import PROJECT_ROOT
 from models.schemas import DeviceInfo
 from services.location_service import (
     DvtLocationService,
@@ -77,6 +82,7 @@ class _ActiveConnection:
     rsd: Optional[RemoteServiceDiscoveryService] = None
     location_service: Optional[LocationService] = None
     usbmux_lockdown: object = None  # Original lockdown client (for legacy fallback on iOS 17+)
+    tunnel_process: asyncio.subprocess.Process | None = None
 
 
 class DeviceManager:
@@ -97,6 +103,56 @@ class DeviceManager:
         self._connections: Dict[str, _ActiveConnection] = {}
         self._wifi_ips: Dict[str, str] = {}  # udid -> wifi_ip cache from last scan
         self._lock = asyncio.Lock()
+
+    async def _log_sidecar_stderr(self, proc: asyncio.subprocess.Process, udid: str) -> None:
+        if proc.stderr is None:
+            return
+        while True:
+            line = await proc.stderr.readline()
+            if not line:
+                return
+            logger.warning("tunnel sidecar[%s]: %s", udid, line.decode(errors="replace").rstrip())
+
+    async def _spawn_tunnel_sidecar(self, args: list[str], udid: str) -> tuple[asyncio.subprocess.Process, dict]:
+        askpass = PROJECT_ROOT / "scripts" / "askpass.sh"
+        user_home = str(Path.home())
+        env = {
+            **os.environ,
+            "SUDO_ASKPASS": str(askpass),
+            "HOME": user_home,
+        }
+        proc = await asyncio.create_subprocess_exec(
+            "sudo",
+            "-A",
+            "--preserve-env=HOME,SUDO_ASKPASS",
+            sys.executable,
+            str(PROJECT_ROOT / "packages" / "backend" / "tunnel_sidecar.py"),
+            *args,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        if proc.stdout is None:
+            raise RuntimeError("Tunnel sidecar stdout unavailable")
+        line = await proc.stdout.readline()
+        if not line:
+            rc = await proc.wait()
+            detail = ""
+            if proc.stderr is not None:
+                detail = (await proc.stderr.read()).decode("utf-8", errors="replace").strip()
+            raise RuntimeError(detail or f"無法啟動管理員 tunnel helper (exit {rc})")
+        payload = json.loads(line.decode("utf-8"))
+        if payload.get("status") != "ready":
+            if proc.stdin is not None:
+                proc.stdin.close()
+            await proc.wait()
+            raise RuntimeError(
+                "無法建立裝置通道。請確認已允許管理員權限，且裝置已解鎖並信任這台電腦。"
+                f" 詳細錯誤: {payload.get('message', 'unknown error')}"
+            )
+        asyncio.create_task(self._log_sidecar_stderr(proc, udid))
+        return proc, payload
 
     # ------------------------------------------------------------------
     # Discovery
@@ -310,19 +366,17 @@ class DeviceManager:
     async def _connect_tunnel(
         self, udid: str, lockdown, ios_version: str, device_name: str = "Unknown"
     ) -> _ActiveConnection:
-        """TCP tunnel for iOS 17+ using CoreDeviceTunnelProxy + RSD."""
+        """TCP tunnel for iOS 17+ using a privileged sidecar + RSD."""
         logger.debug("Establishing TCP tunnel for %s (iOS %s)", udid, ios_version)
 
         try:
-            proxy = await CoreDeviceTunnelProxy.create(lockdown)
-            tunnel_ctx = proxy.start_tcp_tunnel()
-            tunnel_result = await tunnel_ctx.__aenter__()
+            proc, tunnel_result = await self._spawn_tunnel_sidecar(["usb", "--udid", udid], udid)
 
             logger.info("Tunnel established for %s: %s:%s",
-                        udid, tunnel_result.address, tunnel_result.port)
+                        udid, tunnel_result["address"], tunnel_result["port"])
 
             # Create RSD over the tunnel
-            rsd = RemoteServiceDiscoveryService((tunnel_result.address, tunnel_result.port))
+            rsd = RemoteServiceDiscoveryService((tunnel_result["address"], tunnel_result["port"]))
             await rsd.connect()
             logger.info("RSD connected for %s", udid)
 
@@ -331,20 +385,14 @@ class DeviceManager:
                 lockdown=rsd,
                 ios_version=ios_version,
                 device_name=device_name,
-                tunnel_proxy=proxy,
-                tunnel_context=tunnel_ctx,
                 rsd=rsd,
                 usbmux_lockdown=lockdown,
+                tunnel_process=proc,
             )
-        except Exception:
-            logger.exception(
-                "TCP tunnel failed for %s (iOS %s). "
-                "Ensure you are running as administrator.",
-                udid, ios_version,
-            )
+        except Exception as exc:
+            logger.exception("TCP tunnel failed for %s (iOS %s)", udid, ios_version)
             raise RuntimeError(
-                f"無法建立裝置通道 (iOS {ios_version})。"
-                f"請以 sudo 或管理員身份執行 ios-locctl。"
+                f"無法建立裝置通道 (iOS {ios_version})。{exc}"
             )
 
     # -- WiFi via RemotePairing ----------------------------------------
@@ -356,28 +404,19 @@ class DeviceManager:
         WiFi tunnel using RemotePairing protocol.
         Requires remote_*.plist pair record and Python 3.13+.
         """
-        from pymobiledevice3.remote.tunnel_service import (
-            create_core_device_tunnel_service_using_remotepairing,
-        )
-
         logger.debug("Establishing WiFi tunnel to %s at %s:%d", udid, ip, port)
 
         try:
-            # Connect to RemotePairing service
-            service = await create_core_device_tunnel_service_using_remotepairing(
-                udid, ip, port
+            proc, tunnel_result = await self._spawn_tunnel_sidecar(
+                ["wifi", "--udid", udid, "--ip", ip, "--port", str(port)],
+                udid,
             )
-            logger.info("RemotePairing connected to %s", udid)
-
-            # Start TCP tunnel (creates TUN interface, needs sudo)
-            tunnel_ctx = service.start_tcp_tunnel()
-            tunnel_result = await tunnel_ctx.__aenter__()
 
             logger.info("WiFi tunnel established for %s: %s:%s",
-                        udid, tunnel_result.address, tunnel_result.port)
+                        udid, tunnel_result["address"], tunnel_result["port"])
 
             # Create RSD over the tunnel
-            rsd = RemoteServiceDiscoveryService((tunnel_result.address, tunnel_result.port))
+            rsd = RemoteServiceDiscoveryService((tunnel_result["address"], tunnel_result["port"]))
             await rsd.connect()
             logger.info("RSD connected for %s (WiFi)", udid)
 
@@ -396,14 +435,14 @@ class DeviceManager:
                 ios_version=ios_version,
                 device_name=device_name,
                 connection_type="WiFi",
-                tunnel_context=tunnel_ctx,
                 rsd=rsd,
+                tunnel_process=proc,
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("WiFi RemotePairing failed for %s at %s", udid, ip)
             raise RuntimeError(
                 f"無法建立 WiFi 連線 ({ip}:{port})。"
-                f"請確認裝置與電腦在同一網段，且已透過 USB 完成配對。"
+                f"請確認裝置與電腦在同一網段，且已透過 USB 完成配對。{exc}"
             )
 
     # iOS < 17 path removed in v0.1.49 — see UnsupportedIosVersionError.
@@ -448,6 +487,18 @@ class DeviceManager:
                 await conn.tunnel_context.__aexit__(None, None, None)
             except Exception:
                 logger.exception("Error closing tunnel for %s", udid)
+
+        if conn.tunnel_process is not None:
+            try:
+                if conn.tunnel_process.stdin is not None:
+                    conn.tunnel_process.stdin.write(b"stop\n")
+                    await conn.tunnel_process.stdin.drain()
+                    conn.tunnel_process.stdin.close()
+                await asyncio.wait_for(conn.tunnel_process.wait(), timeout=5.0)
+            except Exception:
+                logger.exception("Error stopping tunnel sidecar for %s", udid)
+                with suppress(ProcessLookupError):
+                    conn.tunnel_process.terminate()
 
         # Close tunnel proxy.
         if conn.tunnel_proxy is not None:

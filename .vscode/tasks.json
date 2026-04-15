@@ -4,7 +4,7 @@
     {
       "label": "Backend",
       "type": "shell",
-      "command": "sudo python3 main.py",
+      "command": "${workspaceFolder}/.venv/bin/python main.py",
       "options": {
         "cwd": "${workspaceFolder}/packages/backend"
       },

@@ -16,7 +16,7 @@ interface DeviceStatusProps {
   devices: Device[];
   isConnected: boolean;
   onScan: () => void | Promise<void>;
-  onSelect: (id: string) => void;
+  onSelect: (id: string) => void | Promise<void>;
 }
 
 const DeviceStatus: React.FC<DeviceStatusProps> = ({
@@ -33,6 +33,8 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
   const scanResultTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const devicesRef = React.useRef(devices);
   devicesRef.current = devices;
+  const [connectingDeviceId, setConnectingDeviceId] = useState<string | null>(null);
+  const [connectError, setConnectError] = useState<string | null>(null);
 
   // Manual add device
   const [showManualAdd, setShowManualAdd] = useState(false);
@@ -72,6 +74,20 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
     } catch (err: any) {
       setRepairState('failed');
       setRepairMessage(err?.message || 'Unknown error');
+    }
+  };
+
+  const handleSelectDevice = async (id: string, unsupported: boolean) => {
+    if (unsupported) return;
+    setConnectError(null);
+    setConnectingDeviceId(id);
+    try {
+      await Promise.resolve(onSelect(id));
+      setShowDropdown(false);
+    } catch (err: any) {
+      setConnectError(err?.message || 'Connection failed');
+    } finally {
+      setConnectingDeviceId(null);
     }
   };
 
@@ -213,7 +229,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                 const unsupported = major > 0 && major < 17;
                 return (
                   <div key={d.id}
-                    onClick={() => { if (unsupported) return; onSelect(d.id); setShowDropdown(false); }}
+                    onClick={() => { void handleSelectDevice(d.id, unsupported); }}
                     style={{
                       padding: '8px 12px', cursor: unsupported ? 'not-allowed' : 'pointer',
                       fontSize: 12, display: 'flex', alignItems: 'center', gap: 8,
@@ -238,6 +254,9 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                         {d.wifiIp && <span style={{ opacity: 0.5 }}>{d.wifiIp}</span>}
                       </div>
                     </div>
+                    {connectingDeviceId === d.id && (
+                      <span style={{ fontSize: 10, opacity: 0.7 }}>Connecting...</span>
+                    )}
                     {device?.id === d.id && (
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4caf50" strokeWidth="3">
                         <polyline points="20,6 9,17 4,12" />
@@ -248,6 +267,12 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {connectError && (
+        <div style={{ marginTop: 6, fontSize: 11, color: '#f44336' }}>
+          {connectError}
         </div>
       )}
 

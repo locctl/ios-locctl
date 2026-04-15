@@ -1,11 +1,45 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+import asyncio
+import json
 import logging
+import os
+import sys
+from pathlib import Path
 
+from config import PROJECT_ROOT
 from models.schemas import DeviceInfo
 
 router = APIRouter(prefix="/api/device", tags=["device"])
 logger = logging.getLogger(__name__)
+
+
+async def _run_sidecar_json(*args: str) -> dict:
+    user_home = str(Path.home())
+    env = {
+        **os.environ,
+        "SUDO_ASKPASS": str(PROJECT_ROOT / "scripts" / "askpass.sh"),
+        "HOME": user_home,
+    }
+    proc = await asyncio.create_subprocess_exec(
+        "sudo",
+        "-A",
+        "--preserve-env=HOME,SUDO_ASKPASS",
+        sys.executable,
+        str(PROJECT_ROOT / "packages" / "backend" / "tunnel_sidecar.py"),
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
+    stdout, stderr = await proc.communicate()
+    if not stdout:
+        detail = stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(detail or f"sidecar exited with {proc.returncode}")
+    payload = json.loads(stdout.decode("utf-8").splitlines()[0])
+    if proc.returncode != 0 or payload.get("status") == "error":
+        raise RuntimeError(payload.get("message", "unknown sidecar error"))
+    return payload
 
 
 def _dm():
@@ -30,13 +64,6 @@ async def wifi_repair():
     """
     from pymobiledevice3.lockdown import create_using_usbmux
     from pymobiledevice3.usbmux import list_devices as mux_list_devices
-    from pymobiledevice3.remote.tunnel_service import (
-        CoreDeviceTunnelProxy,
-        create_core_device_tunnel_service_using_rsd,
-    )
-    from pymobiledevice3.remote.remote_service_discovery import RemoteServiceDiscoveryService
-    from pathlib import Path
-
     # Must have USB device
     try:
         raw_devices = await mux_list_devices()
@@ -97,23 +124,9 @@ async def wifi_repair():
         except Exception:
             logger.debug("Re-pair: could not check/remove stale pair record", exc_info=True)
 
-        proxy = None
-        tunnel_ctx = None
-        rsd = None
-        tunnel_svc = None
         try:
-            # Open CoreDeviceTunnelProxy tunnel over USB
-            proxy = await CoreDeviceTunnelProxy.create(lockdown)
-            tunnel_ctx = proxy.start_tcp_tunnel()
-            tunnel_result = await tunnel_ctx.__aenter__()
-
-            # Construct RSD on the tunnel
-            rsd = RemoteServiceDiscoveryService((tunnel_result.address, tunnel_result.port))
-            await rsd.connect()
-
-            # Trigger Trust prompt and save RemotePairing record
-            logger.info("Re-pair: opening CoreDeviceTunnelService — Trust prompt should appear...")
-            tunnel_svc = await create_core_device_tunnel_service_using_rsd(rsd, autopair=True)
+            logger.info("Re-pair: opening CoreDeviceTunnelService via privileged helper...")
+            await _run_sidecar_json("repair", "--udid", udid)
             logger.info("Re-pair: RemotePairing record written for %s", udid)
             remote_record_regenerated = True
         except Exception as e:
@@ -134,24 +147,6 @@ async def wifi_repair():
                     "ios_version": ios_version,
                 },
             )
-        finally:
-            # Cleanup in reverse order
-            for closer in (
-                lambda: tunnel_svc and tunnel_svc.close(),
-                lambda: rsd and rsd.close(),
-                lambda: tunnel_ctx and tunnel_ctx.__aexit__(None, None, None),
-            ):
-                try:
-                    r = closer()
-                    if hasattr(r, "__await__"):
-                        await r
-                except Exception:
-                    pass
-            try:
-                if proxy is not None:
-                    proxy.close()
-            except Exception:
-                pass
 
     return {
         "status": "paired",
