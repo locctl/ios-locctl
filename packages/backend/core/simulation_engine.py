@@ -378,6 +378,7 @@ class SimulationEngine:
         """Push a coordinate to the device and update internal state."""
         await self.location_service.set(lat, lng)
         self.current_position = Coordinate(lat=lat, lng=lng)
+        await self._emit("position_update", {"lat": lat, "lng": lng})
 
     def apply_speed(
         self,

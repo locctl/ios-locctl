@@ -8,6 +8,7 @@
     "jump": "ts-node src/cli.ts jump",
     "move": "ts-node src/cli.ts move",
     "clear": "ts-node src/cli.ts clear",
+    "stop": "ts-node src/cli.ts stop",
     "distance": "ts-node src/cli.ts distance",
     "status": "ts-node src/cli.ts status"
   },

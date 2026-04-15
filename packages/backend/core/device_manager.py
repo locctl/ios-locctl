@@ -69,6 +69,7 @@ class _ActiveConnection:
     udid: str
     lockdown: object  # LockdownClient or RemoteServiceDiscoveryService
     ios_version: str
+    device_name: str = "Unknown"
     connection_type: str = "USB"  # "USB" or "Network"
     dvt_provider: Optional[DvtProvider] = None
     tunnel_proxy: Optional[CoreDeviceTunnelProxy] = None
@@ -94,19 +95,20 @@ class DeviceManager:
 
     def __init__(self) -> None:
         self._connections: Dict[str, _ActiveConnection] = {}
+        self._wifi_ips: Dict[str, str] = {}  # udid -> wifi_ip cache from last scan
         self._lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Discovery
     # ------------------------------------------------------------------
 
-    async def discover_devices(self) -> list[DeviceInfo]:
+    async def discover_devices(self, scan_wifi: bool = True) -> list[DeviceInfo]:
         """
-        Scan for all iOS devices visible over USB and WiFi (usbmuxd).
+        Scan for all iOS devices visible over USB and WiFi.
 
-        usbmuxd returns both USB-connected and WiFi-paired devices on
-        the same network.  Each device carries a ``connection_type`` of
-        ``"USB"`` or ``"Network"``.
+        - USB devices: via usbmux list
+        - WiFi devices: via mDNS (Bonjour) RemotePairing scan (if scan_wifi=True)
+        - Already connected: from _connections cache
 
         Returns a list of ``DeviceInfo`` objects with basic identification
         data.  This does **not** establish a persistent connection.
@@ -114,11 +116,12 @@ class DeviceManager:
         devices: list[DeviceInfo] = []
         seen_udids: set[str] = set()
 
+        # Scan USB devices via usbmux
         try:
             raw_devices = await list_devices()
         except Exception:
             logger.exception("Failed to list usbmux devices")
-            return devices
+            raw_devices = []
 
         for raw in raw_devices:
             try:
@@ -152,34 +155,124 @@ class DeviceManager:
             except Exception:
                 logger.exception("Failed to query device %s", getattr(raw, "serial", "?"))
 
+        # Scan WiFi devices via mDNS (Bonjour) if requested
+        if scan_wifi:
+            try:
+                from pymobiledevice3.bonjour import browse_remotepairing
+                from pathlib import Path
+                import plistlib
+
+                # Find all known RemotePairing UDIDs from saved records
+                pair_records = list(Path.home().glob(".pymobiledevice3/remote_*.plist"))
+                known_udids = {p.stem.replace("remote_", "") for p in pair_records}
+
+                # Scan mDNS for RemotePairing devices (timeout 2s to avoid blocking)
+                mdns_devices = await browse_remotepairing(timeout=2.0)
+
+                for svc in mdns_devices:
+                    # Extract IPv4 address
+                    ip = None
+                    for addr in svc.addresses:
+                        if '.' in addr.ip and not addr.ip.startswith('127.'):
+                            ip = addr.ip
+                            break
+
+                    if not ip:
+                        continue
+
+                    # Try each known UDID (can't determine UDID from mDNS alone)
+                    # In practice, there's usually only 1-2 paired devices
+                    for udid in known_udids:
+                        if udid in seen_udids:
+                            continue
+
+                        # Cache WiFi IP for connect()
+                        self._wifi_ips[udid] = ip
+
+                        # Mark as WiFi-available (will show in UI)
+                        info = DeviceInfo(
+                            udid=udid,
+                            name=svc.host.replace('.local.', '').split('.')[0],
+                            ios_version="Unknown",
+                            connection_type="WiFi",
+                            is_connected=udid in self._connections,
+                            wifi_ip=ip,
+                        )
+                        devices.append(info)
+                        seen_udids.add(udid)
+                        logger.debug("Found WiFi device: %s at %s (UDID: %s)", svc.host, ip, udid)
+                        break  # One mDNS entry per known UDID
+
+            except Exception:
+                logger.debug("WiFi scan failed (normal if no WiFi devices)", exc_info=True)
+
+        # Also include devices connected via tunnel but not visible in either scan
+        for udid, conn in self._connections.items():
+            if udid not in seen_udids:
+                info = DeviceInfo(
+                    udid=udid,
+                    name=conn.device_name or "Unknown Device",
+                    ios_version=conn.ios_version or "0.0",
+                    connection_type=conn.connection_type,
+                    is_connected=True,
+                )
+                devices.append(info)
+                logger.debug("Added active connection not in scan: %s (%s)", info.name, udid)
+
         return devices
 
     # ------------------------------------------------------------------
     # Connection
     # ------------------------------------------------------------------
 
-    async def connect(self, udid: str) -> None:
+    async def connect(self, udid: str, wifi_ip: str | None = None) -> None:
         """
-        Establish a connection appropriate for the device's iOS version.
+        Establish a connection to device via USB or WiFi.
 
-        Supports both USB and WiFi (Network) connections via usbmuxd.
-
-        * **iOS 17+** -- TCP tunnel via CoreDeviceTunnelProxy + RSD.
-        * **iOS < 17** -- plain lockdown over usbmux (no tunnel needed).
+        Auto-detects connection method:
+        - If wifi_ip provided or device only visible via WiFi → RemotePairing
+        - If device visible via USB → CoreDeviceTunnelProxy
         """
         async with self._lock:
             if udid in self._connections:
                 logger.info("Device %s is already connected", udid)
                 return
 
-        # Detect connection type from usbmux device list.
+        # USB path first: try usbmux, fall back to WiFi
+        # Only use WiFi if explicitly requested or USB unavailable
+        usb_available = False
+        if not wifi_ip:
+            try:
+                raw_devices = await list_devices()
+                usb_available = any(raw.serial == udid for raw in raw_devices)
+            except Exception:
+                pass
+
+        # Auto-detect WiFi IP only if USB not available
+        if not wifi_ip and not usb_available:
+            wifi_ip = self._wifi_ips.get(udid)
+            if not wifi_ip:
+                await self.discover_devices(scan_wifi=True)
+                wifi_ip = self._wifi_ips.get(udid)
+            if wifi_ip:
+                logger.debug("USB unavailable, using WiFi IP for %s: %s", udid, wifi_ip)
+
+        # WiFi path: RemotePairing tunnel
+        if wifi_ip and not usb_available:
+            logger.info("Connecting to %s via WiFi (%s)", udid, wifi_ip)
+            conn = await self._connect_wifi_remotepairing(udid, wifi_ip)
+            async with self._lock:
+                self._connections[udid] = conn
+            logger.info("Connected to %s (iOS %s) via WiFi", udid, conn.ios_version)
+            return
+
+        # USB path: CoreDeviceTunnelProxy + RSD (original logic)
         connection_type = "USB"
         try:
             raw_devices = await list_devices()
             for raw in raw_devices:
                 if raw.serial == udid:
                     connection_type = getattr(raw, "connection_type", "USB")
-                    # Prefer USB if device shows up as both
                     if connection_type == "USB":
                         break
         except Exception:
@@ -187,7 +280,6 @@ class DeviceManager:
 
         logger.info("Connecting to %s via %s", udid, connection_type)
 
-        # Create a fresh lockdown client to read the iOS version.
         try:
             lockdown = await create_using_usbmux(serial=udid)
         except Exception:
@@ -195,6 +287,7 @@ class DeviceManager:
             raise
 
         ios_version_str: str = lockdown.all_values.get("ProductVersion", "0.0")
+        device_name: str = lockdown.all_values.get("DeviceName", "Unknown")
         ver = _parse_ios_version(ios_version_str)
 
         if ver < (17, 0):
@@ -204,7 +297,7 @@ class DeviceManager:
             )
             raise UnsupportedIosVersionError(ios_version_str)
 
-        conn = await self._connect_tunnel(udid, lockdown, ios_version_str)
+        conn = await self._connect_tunnel(udid, lockdown, ios_version_str, device_name)
         conn.connection_type = connection_type
 
         async with self._lock:
@@ -215,7 +308,7 @@ class DeviceManager:
     # -- iOS 17+ via CoreDeviceTunnelProxy ---------------------------------
 
     async def _connect_tunnel(
-        self, udid: str, lockdown, ios_version: str
+        self, udid: str, lockdown, ios_version: str, device_name: str = "Unknown"
     ) -> _ActiveConnection:
         """TCP tunnel for iOS 17+ using CoreDeviceTunnelProxy + RSD."""
         logger.debug("Establishing TCP tunnel for %s (iOS %s)", udid, ios_version)
@@ -237,6 +330,7 @@ class DeviceManager:
                 udid=udid,
                 lockdown=rsd,
                 ios_version=ios_version,
+                device_name=device_name,
                 tunnel_proxy=proxy,
                 tunnel_context=tunnel_ctx,
                 rsd=rsd,
@@ -251,6 +345,65 @@ class DeviceManager:
             raise RuntimeError(
                 f"無法建立裝置通道 (iOS {ios_version})。"
                 f"請以 sudo 或管理員身份執行 ios-locctl。"
+            )
+
+    # -- WiFi via RemotePairing ----------------------------------------
+
+    async def _connect_wifi_remotepairing(
+        self, udid: str, ip: str, port: int = 49152
+    ) -> _ActiveConnection:
+        """
+        WiFi tunnel using RemotePairing protocol.
+        Requires remote_*.plist pair record and Python 3.13+.
+        """
+        from pymobiledevice3.remote.tunnel_service import (
+            create_core_device_tunnel_service_using_remotepairing,
+        )
+
+        logger.debug("Establishing WiFi tunnel to %s at %s:%d", udid, ip, port)
+
+        try:
+            # Connect to RemotePairing service
+            service = await create_core_device_tunnel_service_using_remotepairing(
+                udid, ip, port
+            )
+            logger.info("RemotePairing connected to %s", udid)
+
+            # Start TCP tunnel (creates TUN interface, needs sudo)
+            tunnel_ctx = service.start_tcp_tunnel()
+            tunnel_result = await tunnel_ctx.__aenter__()
+
+            logger.info("WiFi tunnel established for %s: %s:%s",
+                        udid, tunnel_result.address, tunnel_result.port)
+
+            # Create RSD over the tunnel
+            rsd = RemoteServiceDiscoveryService((tunnel_result.address, tunnel_result.port))
+            await rsd.connect()
+            logger.info("RSD connected for %s (WiFi)", udid)
+
+            # Get device info from RSD
+            try:
+                props = rsd.peer_info
+                ios_version = props.get("Properties", {}).get("OSVersion", "Unknown")
+                device_name = props.get("Properties", {}).get("Name", "iPad")
+            except Exception:
+                ios_version = "Unknown"
+                device_name = "iPad"
+
+            return _ActiveConnection(
+                udid=udid,
+                lockdown=rsd,
+                ios_version=ios_version,
+                device_name=device_name,
+                connection_type="WiFi",
+                tunnel_context=tunnel_ctx,
+                rsd=rsd,
+            )
+        except Exception:
+            logger.exception("WiFi RemotePairing failed for %s at %s", udid, ip)
+            raise RuntimeError(
+                f"無法建立 WiFi 連線 ({ip}:{port})。"
+                f"請確認裝置與電腦在同一網段，且已透過 USB 完成配對。"
             )
 
     # iOS < 17 path removed in v0.1.49 — see UnsupportedIosVersionError.
@@ -533,6 +686,7 @@ class DeviceManager:
             udid=udid,
             lockdown=rsd,
             ios_version=ios_version_str,
+            device_name=device_name,
             connection_type="Network",
             rsd=rsd,
         )

@@ -393,13 +393,14 @@ const App: React.FC = () => {
             name: d.name,
             iosVersion: d.ios_version,
             connectionType: d.connection_type,
+            wifiIp: (d as any).wifi_ip,
           }))}
           isConnected={device.connectedDevice !== null}
           onScan={() => { device.scan() }}
-          onSelect={(id: string) => { device.connect(id) }}
-          onStartWifiTunnel={device.startWifiTunnel}
-          onStopTunnel={device.stopTunnel}
-          tunnelStatus={device.tunnelStatus}
+          onSelect={(id: string) => {
+            const dev = device.devices.find(d => d.udid === id)
+            device.connect(id, (dev as any)?.wifi_ip)
+          }}
         />
         <ControlPanel
           simMode={sim.mode}

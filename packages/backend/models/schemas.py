@@ -41,6 +41,7 @@ class DeviceInfo(BaseModel):
     ios_version: str
     connection_type: str = "usb"
     is_connected: bool = False
+    wifi_ip: str | None = None
 
 
 # ── Location requests ────────────────────────────────────

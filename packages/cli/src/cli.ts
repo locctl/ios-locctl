@@ -1,25 +1,66 @@
-import {
-  listDevices,
-  isIOS17OrAbove,
-  isTunnelRunning,
-  startTunneld,
-  DeviceInfo,
-} from "./device";
-import { setLocation, clearLocation, cleanup } from "./location";
-import { move } from "./movement";
-import { Coord, haversine, getCooldown } from "./geo";
-import { savePosition, loadPosition, clearSavedPosition } from "./state";
+/**
+ * ios-locctl CLI — lightweight HTTP client that calls the backend API.
+ * All device/location logic is handled by the backend (packages/backend).
+ * Backend must be running: pnpm dev
+ */
 
-const [, , command, ...rest] = process.argv;
+const API = "http://127.0.0.1:8777";
 
+// ── HTTP helpers ────────────────────────────────────────
 
-function parseArgs(args: string[]): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const arg of args) {
-    const match = arg.match(/^--(\w+)=(.+)$/);
-    if (match) result[match[1]] = match[2];
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const opts: RequestInit = {
+    method,
+    headers: { "Content-Type": "application/json" },
+  };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API}${path}`, opts);
+  } catch {
+    console.error("Error: Backend not running. Start with: pnpm dev");
+    process.exit(1);
   }
-  return result;
+
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({ detail: res.statusText })) as any;
+    const msg = typeof errBody.detail === "string" ? errBody.detail : errBody.detail?.message || res.statusText;
+    throw new Error(msg);
+  }
+  return res.json() as Promise<T>;
+}
+
+// ── Geo helpers ─────────────────────────────────────────
+
+interface Coord {
+  lat: number;
+  lng: number;
+}
+
+function haversine(a: Coord, b: Coord): number {
+  const R = 6371;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+function getCooldown(km: number): string {
+  if (km <= 1) return "1 min";
+  if (km <= 5) return "2 min";
+  if (km <= 10) return "6 min";
+  if (km <= 25) return "11 min";
+  if (km <= 50) return "22 min";
+  if (km <= 100) return "35 min";
+  if (km <= 250) return "53 min";
+  if (km <= 500) return "1 hr";
+  if (km <= 750) return "1 hr 18 min";
+  if (km <= 1000) return "1.5 hr";
+  return "2 hr";
 }
 
 function parseCoord(value: string): Coord {
@@ -30,209 +71,128 @@ function parseCoord(value: string): Coord {
   return { lat, lng };
 }
 
-async function getDevice(): Promise<{ device: DeviceInfo; ios17: boolean }> {
-  const devices = await listDevices();
-  if (devices.length === 0) {
-    console.error("No iPhone connected. Check USB cable and trust prompt.");
-    process.exit(1);
-  }
-  const device = devices[0];
-  const ios17 = isIOS17OrAbove(device.ProductVersion);
+// ── Commands ────────────────────────────────────────────
 
-  console.log(`Device: ${device.DeviceName} (iOS ${device.ProductVersion})`);
-
-  if (ios17) {
-    const tunnel = await isTunnelRunning();
-    if (!tunnel) {
-      console.log("iOS 17+ detected. Starting tunneld (will ask for password)...");
-      await startTunneld();
-      console.log("tunneld started.");
-    }
-  }
-
-  return { device, ios17 };
-}
+const [, , command, ...rest] = process.argv;
 
 async function main() {
   switch (command) {
     case "devices": {
-      const devices = await listDevices();
+      const devices = await request<any[]>("GET", "/api/device/list");
       if (devices.length === 0) {
         console.log("No devices found.");
       } else {
         for (const d of devices) {
-          console.log(
-            `- ${d.DeviceName} | iOS ${d.ProductVersion} | ${d.UniqueDeviceID}`
-          );
+          const status = d.is_connected ? "●" : "○";
+          const type = d.wifi_ip ? `WiFi ${d.wifi_ip}` : d.connection_type;
+          console.log(`${status} ${d.name} | iOS ${d.ios_version} | ${type} | ${d.udid}`);
         }
       }
       break;
     }
 
     case "jump": {
-      const args = parseArgs(rest);
-      let lat: number;
-      let lng: number;
-
-      // Support shorthand: pnpm jump 25.033,121.565
-      if (rest[0] && !rest[0].startsWith("--")) {
-        const coord = parseCoord(rest[0]);
-        lat = coord.lat;
-        lng = coord.lng;
-      } else if (args.lat && args.lng) {
-        lat = Number(args.lat);
-        lng = Number(args.lng);
-        if (isNaN(lat) || isNaN(lng)) {
-          console.error("lat and lng must be numbers.");
-          process.exit(1);
-        }
-      } else {
-        console.error("Usage: pnpm jump 25.033,121.565\n       pnpm jump --lat=25.033 --lng=121.565");
+      if (!rest[0]) {
+        console.error("Usage: pnpm jump 25.033,121.565");
         process.exit(1);
       }
+      const { lat, lng } = parseCoord(rest[0]);
 
-      const { ios17 } = await getDevice();
-      const lastPos = loadPosition();
-      if (lastPos) {
-        const dist = haversine(lastPos, { lat, lng });
-        console.log(`Last position: ${lastPos.lat}, ${lastPos.lng}`);
-        console.log(`Jump distance: ${dist.toFixed(1)} km | Cooldown: ${getCooldown(dist).text}`);
-      }
-      console.log(`Setting location: ${lat}, ${lng}`);
-      await setLocation(lat, lng, ios17);
-      savePosition({ lat, lng });
-      console.log("Location set. Press Ctrl+C to stop and restore real GPS.");
-      process.on("SIGINT", () => {
-        cleanup();
-        process.exit(0);
-      });
-      // Keep process alive
-      await new Promise(() => {});
+      // Show distance from last position
+      try {
+        const status = await request<any>("GET", "/api/location/status");
+        if (status.current_position) {
+          const last = status.current_position;
+          const dist = haversine(last, { lat, lng });
+          console.log(`Last: ${last.lat.toFixed(4)}, ${last.lng.toFixed(4)}`);
+          console.log(`Jump: ${dist.toFixed(1)} km | Cooldown: ${getCooldown(dist)}`);
+        }
+      } catch {}
+
+      console.log(`Setting: ${lat}, ${lng}`);
+      await request("POST", "/api/location/teleport", { lat, lng });
+      console.log("Location set.");
       break;
     }
 
     case "move": {
-      const args = parseArgs(rest);
-      let from: Coord;
-      let to: Coord;
-      let speedKmh: number;
-
-      // Support shorthand: pnpm move 25.040,121.570 60
-      if (rest[0] && !rest[0].startsWith("--")) {
-        to = parseCoord(rest[0]);
-        speedKmh = rest[1] ? Number(rest[1]) : 5;
-        const lastPos = loadPosition();
-        if (!lastPos) {
-          console.error("No saved position. Use --from to specify start point.");
-          process.exit(1);
-        }
-        from = lastPos;
-        console.log(`From last position: ${from.lat}, ${from.lng}`);
-      } else if (args.to) {
-        to = parseCoord(args.to);
-        speedKmh = Number(args.speed || "5");
-        if (args.from) {
-          from = parseCoord(args.from);
-        } else {
-          const lastPos = loadPosition();
-          if (!lastPos) {
-            console.error("No saved position. Use --from to specify start point.");
-            process.exit(1);
-          }
-          from = lastPos;
-          console.log(`From last position: ${from.lat}, ${from.lng}`);
-        }
-      } else {
-        console.error(
-          "Usage: pnpm move 25.040,121.570 60\n" +
-          "       pnpm move --to=25.040,121.570 --speed=5\n" +
-          "       pnpm move --from=25.033,121.565 --to=25.040,121.570 --speed=5"
-        );
+      if (!rest[0]) {
+        console.error("Usage: pnpm move 25.040,121.570 60");
         process.exit(1);
       }
-      const dist = haversine(from, to);
-      console.log(`Distance: ${dist.toFixed(1)} km`);
+      const to = parseCoord(rest[0]);
+      const speed = rest[1] ? Number(rest[1]) : 5;
+      const mode = speed > 20 ? "driving" : speed > 8 ? "running" : "walking";
 
-      const { ios17 } = await getDevice();
-      await move({ from, to, speedKmh, ios17, onProgress: savePosition });
-      // Hold position at destination
-      console.log("Holding position. Press Ctrl+C to stop.");
-      await setLocation(to.lat, to.lng, ios17);
-      savePosition(to);
-      process.on("SIGINT", () => {
-        cleanup();
-        process.exit(0);
+      console.log(`Moving to ${to.lat}, ${to.lng} at ${speed} km/h (${mode})`);
+      await request("POST", "/api/location/navigate", {
+        lat: to.lat,
+        lng: to.lng,
+        mode,
+        speed_kmh: speed,
       });
-      await new Promise(() => {});
+      console.log("Navigation started.");
       break;
     }
 
-    case "distance": {
-      const args = parseArgs(rest);
-      let from: Coord;
-      let to: Coord;
-
-      // Support shorthand: pnpm distance 25.040,121.570
-      if (rest[0] && !rest[0].startsWith("--")) {
-        to = parseCoord(rest[0]);
-        const lastPos = loadPosition();
-        if (!lastPos) {
-          console.error("No saved position. Use --from to specify start point.");
-          process.exit(1);
-        }
-        from = lastPos;
-        console.log(`From last position: ${from.lat}, ${from.lng}`);
-      } else if (args.to) {
-        to = parseCoord(args.to);
-        if (args.from) {
-          from = parseCoord(args.from);
-        } else {
-          const lastPos = loadPosition();
-          if (!lastPos) {
-            console.error("No saved position. Use --from to specify start point.");
-            process.exit(1);
-          }
-          from = lastPos;
-          console.log(`From last position: ${from.lat}, ${from.lng}`);
-        }
-      } else {
-        console.error(
-          "Usage: pnpm distance 25.040,121.570\n" +
-          "       pnpm distance --from=lat,lng --to=lat,lng"
-        );
-        process.exit(1);
-      }
-      const dist = haversine(from, to);
-      console.log(`Distance: ${dist.toFixed(1)} km | Cooldown: ${getCooldown(dist).text}`);
-      break;
-    }
-
-    case "clear": {
-      const { ios17 } = await getDevice();
-      await clearLocation(ios17);
-      clearSavedPosition();
-      console.log("Location simulation cleared. Saved position removed.");
+    case "stop": {
+      await request("POST", "/api/location/stop");
+      console.log("Simulation stopped.");
       break;
     }
 
     case "status": {
-      const lastPos = loadPosition();
-      if (lastPos) {
-        console.log(`Last position: ${lastPos.lat}, ${lastPos.lng}`);
+      const status = await request<any>("GET", "/api/location/status");
+      if (status.current_position) {
+        const p = status.current_position;
+        console.log(`Position: ${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`);
+        console.log(`State: ${status.state}`);
+        if (status.speed_mps) console.log(`Speed: ${(status.speed_mps * 3.6).toFixed(1)} km/h`);
       } else {
-        console.log("No saved position.");
+        console.log("No position set.");
       }
+      break;
+    }
+
+    case "distance": {
+      if (!rest[0]) {
+        console.error("Usage: pnpm distance 25.040,121.570");
+        process.exit(1);
+      }
+      const to = parseCoord(rest[0]);
+
+      try {
+        const status = await request<any>("GET", "/api/location/status");
+        if (status.current_position) {
+          const from = status.current_position;
+          const dist = haversine(from, to);
+          console.log(`From: ${from.lat.toFixed(4)}, ${from.lng.toFixed(4)}`);
+          console.log(`Distance: ${dist.toFixed(1)} km | Cooldown: ${getCooldown(dist)}`);
+        } else {
+          console.log("No current position. Jump to a location first.");
+        }
+      } catch {
+        console.log("No current position. Jump to a location first.");
+      }
+      break;
+    }
+
+    case "clear": {
+      await request("POST", "/api/location/stop");
+      console.log("Location simulation cleared.");
       break;
     }
 
     default:
       console.log(
-        "Usage:\n" +
-          "  pnpm devices                List connected iPhones\n" +
-          "  pnpm status                 Show last saved position\n" +
-          "  pnpm jump 25.033,121.565    Set location\n" +
-          "  pnpm move 25.040,121.570 60 Move from last position (speed optional)\n" +
+        "ios-locctl CLI (requires backend: pnpm dev)\n\n" +
+          "Usage:\n" +
+          "  pnpm devices                List connected devices\n" +
+          "  pnpm status                 Show current position\n" +
+          "  pnpm jump 25.033,121.565    Teleport to coordinate\n" +
+          "  pnpm move 25.040,121.570 60 Navigate (speed km/h)\n" +
           "  pnpm distance 25.040,121.57 Calculate distance & cooldown\n" +
+          "  pnpm stop                   Stop simulation\n" +
           "  pnpm clear                  Clear simulated location\n"
       );
       break;

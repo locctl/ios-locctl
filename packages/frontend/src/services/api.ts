@@ -73,15 +73,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 // Device
 export const listDevices = () => request<any[]>('GET', '/api/device/list')
-export const connectDevice = (udid: string) => request<any>('POST', `/api/device/${udid}/connect`)
+export const connectDevice = (udid: string, wifiIp?: string) =>
+  request<any>('POST', `/api/device/${udid}/connect`, wifiIp ? { wifi_ip: wifiIp } : undefined)
 export const disconnectDevice = (udid: string) => request<any>('DELETE', `/api/device/${udid}/connect`)
-export const wifiConnect = (ip: string) => request<any>('POST', '/api/device/wifi/connect', { ip })
-export const wifiScan = () => request<any[]>('GET', '/api/device/wifi/scan')
-export const wifiTunnelStartAndConnect = (ip: string, port = 49152, udid?: string) =>
-  request<any>('POST', '/api/device/wifi/tunnel/start-and-connect', { ip, port, ...(udid ? { udid } : {}) })
-export const wifiTunnelStatus = () => request<any>('GET', '/api/device/wifi/tunnel/status')
-export const wifiTunnelDiscover = () => request<{ devices: { ip: string; port: number; host: string; name: string }[] }>('GET', '/api/device/wifi/tunnel/discover')
-export const wifiTunnelStop = () => request<any>('POST', '/api/device/wifi/tunnel/stop')
 export const wifiRepair = () => request<{ status: string; udid: string; name: string; ios_version: string; remote_record_regenerated: boolean }>('POST', '/api/device/wifi/repair')
 
 // Location simulation

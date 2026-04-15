@@ -335,4 +335,5 @@ async def root():
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host=API_HOST, port=API_PORT, reload=False)
+    # Disable uvloop — incompatible with Python 3.13 TLS-PSK (WiFi RemotePairing)
+    uvicorn.run("main:app", host=API_HOST, port=API_PORT, reload=False, loop="asyncio")

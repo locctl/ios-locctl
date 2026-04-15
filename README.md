@@ -5,7 +5,7 @@
 ## 系統需求
 
 - macOS
-- Python 3.12+ (Web 介面) / Python 3.13+ (WiFi Tunnel)
+- Python 3.13+（WiFi RemotePairing 需要原生 TLS-PSK）
 - Node.js 18+ & pnpm
 - iOS 17+ 裝置
 
@@ -17,12 +17,12 @@ pnpm setup
 
 # 2. 開啟 Developer Mode（需暫時關閉密碼，完成後可設回）
 pymobiledevice3 amfi enable-developer-mode
-# → 平板/手機跳「信任這台電腦」→ 按信任 → 重開機 → 確認開啟
+# → 裝置跳「信任這台電腦」→ 按信任 → 重開機 → 確認開啟
 
 # 3. 掛載 DeveloperDiskImage
 pymobiledevice3 mounter auto-mount --tunnel ''
 
-# 4. 啟動（會彈密碼框要求 sudo 權限）
+# 4. 啟動（sudo 權限用於建立 TUN interface）
 pnpm dev
 ```
 
@@ -30,59 +30,77 @@ pnpm dev
 
 ---
 
+## 連線方式
+
+### USB（預設）
+
+插上 USB 資料線，啟動服務即自動連接。
+
+### WiFi（首次需 USB 配對）
+
+1. **首次配對：** 插 USB → 啟動服務 → 配對完成（生成 `~/.pymobiledevice3/remote_*.plist`）
+2. **之後使用：** 拔 USB → 點「Scan」→ 選擇 WiFi 裝置 → 連接
+3. **換網路：** 不用重新配對，重新掃描即可
+4. **掃不到：** 點「Manual」手動輸入裝置 WiFi IP
+5. **配對損壞：** 點「Repair」→ 插 USB 重新配對
+
+> 配對記錄永久有效，除非手動清除或裝置重置。
+
+---
+
 ## 使用方式
 
 ### Web 介面（推薦）
 
-**功能：**
 - 地圖點擊瞬移
 - 右鍵選單：瞬移、導航、加書籤
-- 路線規劃與巡迴
-- 多點導航
+- 路線規劃與巡迴、多點導航
 - 隨機漫步
 - 搖桿即時控制（WASD / 方向鍵）
 - 冷卻計時器
 - GPX 匯入/匯出
-- WiFi 無線控制（設定後可拔 USB）
 
 ### CLI 指令
 
+CLI 透過後端 API 操作，需先啟動 `pnpm dev`。
+
 ```bash
-pnpm devices                   # 列出裝置
-pnpm status                    # 查看當前模擬位置
-pnpm jump 25.033,121.565       # 跳到指定座標（支援簡寫）
-pnpm move 25.040,121.570 60    # 從當前位置移動（速度 km/h）
+pnpm devices                   # 列出裝置（USB + WiFi）
+pnpm status                    # 查看當前位置與狀態
+pnpm jump 25.033,121.565       # 瞬移到座標
+pnpm move 25.040,121.570 60    # 導航移動（速度 km/h）
 pnpm distance 25.040,121.570   # 計算距離與冷卻時間
+pnpm stop                      # 停止模擬
 pnpm clear                     # 清除模擬定位
 ```
 
-**狀態同步：** CLI 和 Web 介面共用 `data/settings.json`，狀態完全同步。
-
 ---
 
-## 專案結構
+## 專案架構
 
 ```
 ios-locctl/
 ├── packages/
-│   ├── backend/      # Python FastAPI 後端
+│   ├── backend/      # Python FastAPI 後端（統一處理 USB/WiFi 連線）
 │   ├── frontend/     # React + Vite 前端
-│   └── cli/          # TypeScript CLI
+│   └── cli/          # TypeScript CLI（HTTP 客戶端，調用後端 API）
 ├── data/
 │   ├── bookmarks.json  # 預設座標書籤
-│   └── settings.json   # 狀態與設定
+│   └── settings.json   # 狀態與設定（CLI/Web 共用）
 ├── package.json
 └── pnpm-workspace.yaml
 ```
+
+**所有操作統一透過後端 API：** CLI 和 Web 介面不直接操作裝置，確保狀態一致。
 
 ---
 
 ## 注意事項
 
-- USB **資料線**要一直插著（WiFi Tunnel 設定後可拔線）
-- Finder 看不到裝置 = 充電線（需要資料線）
-- 進程結束或拔線，定位會恢復真實位置
+- USB 需要**資料線**（Finder 看不到裝置 = 充電線）
+- WiFi 模式下拔線後定位持續有效（直到服務停止）
 - **座標格式：逗號中間不能有空格** — `25.033,121.565` ✓ | `25.033, 121.565` ✗
+- `data/bookmarks.json` 有預設座標可參考
 
 ---
 
@@ -91,12 +109,6 @@ ios-locctl/
 使用本工具進行 Pikmin Bloom 等位置類遊戲時，請參考：
 
 **📖 [Pikmin Bloom 飛人指南](PIKMIN_GUIDE.md)**
-
-內容包含：
-- 冷卻時間與安全做法
-- 裝飾皮克敏收集指南
-- 蘑菇戰鬥效率攻略
-- 風險評估與社群現況
 
 ---
 
