@@ -37,6 +37,8 @@ const App: React.FC = () => {
   const [cooldownEnabled, setCooldownEnabled] = useState(true)
   const [randomWalkRadius, setRandomWalkRadius] = useState(500)
   const [toastMsg, setToastMsg] = useState<string | null>(null)
+  const [selectedTarget, setSelectedTarget] = useState<{ lat: number; lng: number; label?: string; source?: string } | null>(null)
+  const [recenterToCurrentSignal, setRecenterToCurrentSignal] = useState(0)
 
   const showToast = useCallback((msg: string, ms = 2000) => {
     setToastMsg(msg)
@@ -168,11 +170,35 @@ const App: React.FC = () => {
 
   const handleTeleport = useCallback((lat: number, lng: number) => {
     sim.teleport(lat, lng)
+    setSelectedTarget(null)
   }, [sim])
 
   const handleNavigate = useCallback((lat: number, lng: number) => {
     sim.navigate(lat, lng)
+    setSelectedTarget(null)
   }, [sim])
+
+  const handleAddWaypointTarget = useCallback((lat: number, lng: number) => {
+    sim.setWaypoints((prev: any[]) => {
+      if (prev.length === 0 && sim.currentPosition) {
+        return [
+          { lat: sim.currentPosition.lat, lng: sim.currentPosition.lng },
+          { lat, lng },
+        ]
+      }
+      return [...prev, { lat, lng }]
+    })
+    setSelectedTarget(null)
+  }, [sim])
+
+  const handleSelectTarget = useCallback((lat: number, lng: number, meta?: { label?: string; source?: string }) => {
+    setSelectedTarget({ lat, lng, label: meta?.label, source: meta?.source })
+  }, [])
+
+  const handleCancelTarget = useCallback(() => {
+    setSelectedTarget(null)
+    setRecenterToCurrentSignal((prev) => prev + 1)
+  }, [])
 
   const [addBmDialog, setAddBmDialog] = useState<{ lat: number; lng: number; name: string; category: string } | null>(null)
 
@@ -398,7 +424,7 @@ const App: React.FC = () => {
           isConnected={device.connectedDevice !== null}
           onScan={() => {
             sim.clearError()
-            return device.scan()
+            void device.scan()
           }}
           onSelect={async (id: string) => {
             sim.clearError()
@@ -433,17 +459,17 @@ const App: React.FC = () => {
           onRestore={handleRestore}
           onApplySpeed={handleApplySpeed}
           waypointProgress={sim.waypointProgress}
-          onTeleport={handleTeleport}
-          onNavigate={handleNavigate}
+          onLocationPick={handleSelectTarget}
           bookmarks={bm.bookmarks.map(b => ({
             id: b.id,
             name: b.name,
             lat: b.lat,
             lng: b.lng,
             category: bm.categories.find(c => c.id === b.category_id)?.name || t('bm.default'),
+            note: b.note || '',
           }))}
           bookmarkCategories={bm.categories.map(c => c.name)}
-          onBookmarkClick={(b: any) => handleTeleport(b.lat, b.lng)}
+          onBookmarkClick={(b: any) => handleSelectTarget(b.lat, b.lng, { label: b.name, source: 'bookmark' })}
           onBookmarkAdd={(b: any) => {
             const cat = bm.categories.find(c => c.name === b.category)
             bm.createBookmark({ name: b.name, lat: b.lat, lng: b.lng, category_id: cat?.id || 'default' })
@@ -659,8 +685,11 @@ const App: React.FC = () => {
           </div>
         )}
         <MapView
+          activeMode={sim.mode}
           currentPosition={currentPos}
-          destination={destPos}
+          destination={selectedTarget ?? destPos}
+          selectedTarget={selectedTarget}
+          recenterToCurrentSignal={recenterToCurrentSignal}
           waypoints={sim.waypoints.map((w, i) => ({ ...w, index: i }))}
           routePath={sim.routePath}
           randomWalkRadius={
@@ -671,6 +700,9 @@ const App: React.FC = () => {
           onMapClick={handleMapClick}
           onTeleport={handleTeleport}
           onNavigate={handleNavigate}
+          onLocationPick={handleSelectTarget}
+          onCancelTarget={handleCancelTarget}
+          onAddTargetWaypoint={handleAddWaypointTarget}
           onAddBookmark={handleAddBookmark}
           onAddWaypoint={handleAddWaypoint}
           showWaypointOption={sim.mode === SimMode.Loop || sim.mode === SimMode.MultiStop || sim.mode === SimMode.Navigate}

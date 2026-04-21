@@ -8,6 +8,7 @@ interface Bookmark {
   lat: number;
   lng: number;
   category: string;
+  note?: string;
 }
 
 interface Position {
@@ -68,6 +69,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newName, setNewName] = useState('');
+  const [newNote, setNewNote] = useState('');
   const [newCategory, setNewCategory] = useState(categories[0] || 'Default');
   const [showCategoryMgr, setShowCategoryMgr] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -76,6 +78,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   const [editName, setEditName] = useState('');
   const [showCustomDialog, setShowCustomDialog] = useState(false);
   const [customName, setCustomName] = useState('');
+  const [customNote, setCustomNote] = useState('');
   const [customLat, setCustomLat] = useState('');
   const [customLng, setCustomLng] = useState('');
   const [customCategory, setCustomCategory] = useState(categories[0] || 'Default');
@@ -110,11 +113,13 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
     if (!newName.trim() || !currentPosition) return;
     onBookmarkAdd({
       name: newName.trim(),
+      note: newNote.trim(),
       lat: currentPosition.lat,
       lng: currentPosition.lng,
       category: newCategory,
     });
     setNewName('');
+    setNewNote('');
     setShowAddDialog(false);
   };
 
@@ -125,8 +130,8 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
     if (!name) return;
     if (!Number.isFinite(lat) || lat < -90 || lat > 90) return;
     if (!Number.isFinite(lng) || lng < -180 || lng > 180) return;
-    onBookmarkAdd({ name, lat, lng, category: customCategory });
-    setCustomName(''); setCustomLat(''); setCustomLng('');
+    onBookmarkAdd({ name, note: customNote.trim(), lat, lng, category: customCategory });
+    setCustomName(''); setCustomNote(''); setCustomLat(''); setCustomLng('');
     setShowCustomDialog(false);
   };
 
@@ -248,9 +253,15 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
             placeholder={t('bm.name_placeholder')}
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleAddBookmark()}
             style={{ width: '100%', marginBottom: 8 }}
             autoFocus
+          />
+          <textarea
+            className="search-input"
+            placeholder={t('bm.note_placeholder')}
+            value={newNote}
+            onChange={(e) => setNewNote(e.target.value)}
+            style={{ width: '100%', marginBottom: 8, minHeight: 64, resize: 'vertical' }}
           />
           <select
             value={newCategory}
@@ -424,7 +435,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
               {bms.length === 0 && (
                 <div style={{ fontSize: 11, opacity: 0.4, padding: '4px 0' }}>{t('bm.blank')}</div>
               )}
-              {bms.map((bm) => (
+          {bms.map((bm) => (
                 <div
                   key={bm.id ?? `${bm.lat}-${bm.lng}`}
                   className="bookmark-item"
@@ -443,10 +454,10 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                   onMouseEnter={(e) => {
                     (e.currentTarget as HTMLDivElement).style.background = '#3a3a3e';
                   }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLDivElement).style.background = 'transparent';
-                  }}
-                >
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLDivElement).style.background = 'transparent';
+                    }}
+                  >
                   <svg
                     width="12"
                     height="12"
@@ -481,10 +492,52 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                       <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {bm.name}
                       </span>
+                      {bm.note && (
+                        <span
+                          style={{
+                            fontSize: 10,
+                            opacity: 0.72,
+                            lineHeight: 1.3,
+                            marginTop: 2,
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                            whiteSpace: 'normal',
+                          }}
+                        >
+                          {bm.note}
+                        </span>
+                      )}
                       <span style={{ fontSize: 10, opacity: 0.55, fontFamily: 'monospace' }}>
                         {bm.lat.toFixed(5)}, {bm.lng.toFixed(5)}
                       </span>
                     </div>
+                  )}
+                  {bm.id && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm(t('bm.delete_confirm', { name: bm.name }))) {
+                          onBookmarkDelete(bm.id!);
+                        }
+                      }}
+                      title={t('generic.delete')}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'rgba(255,255,255,0.55)',
+                        cursor: 'pointer',
+                        padding: '2px 4px',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="3,6 5,6 21,6" />
+                        <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                      </svg>
+                    </button>
                   )}
                 </div>
               ))}
@@ -646,11 +699,14 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
               value={customName}
               autoFocus
               onChange={(e) => setCustomName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleAddCustom();
-                if (e.key === 'Escape') setShowCustomDialog(false);
-              }}
               style={{ width: '100%', marginBottom: 8 }}
+            />
+            <textarea
+              className="search-input"
+              placeholder={t('bm.note_placeholder')}
+              value={customNote}
+              onChange={(e) => setCustomNote(e.target.value)}
+              style={{ width: '100%', marginBottom: 8, minHeight: 64, resize: 'vertical' }}
             />
             <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
               <input

@@ -75,8 +75,7 @@ interface ControlPanelProps {
   onRestore: () => void;
   onApplySpeed?: () => Promise<void> | void;
   waypointProgress?: { current: number; next: number; total: number } | null;
-  onTeleport: (lat: number, lng: number) => void;
-  onNavigate: (lat: number, lng: number) => void;
+  onLocationPick: (lat: number, lng: number) => void;
   bookmarks: Bookmark[];
   bookmarkCategories: string[];
   onBookmarkClick: (bm: Bookmark) => void;
@@ -195,8 +194,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onRestore,
   onApplySpeed,
   waypointProgress,
-  onTeleport,
-  onNavigate,
+  onLocationPick,
   bookmarks,
   bookmarkCategories,
   onBookmarkClick,
@@ -271,20 +269,12 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     const lat = parseFloat(coordLat);
     const lng = parseFloat(coordLng);
     if (!isNaN(lat) && !isNaN(lng)) {
-      if (simMode === SimMode.Teleport) {
-        onTeleport(lat, lng);
-      } else {
-        onNavigate(lat, lng);
-      }
+      onLocationPick(lat, lng);
     }
   };
 
   const handleSearchSelect = (lat: number, lng: number, _name: string) => {
-    if (simMode === SimMode.Teleport) {
-      onTeleport(lat, lng);
-    } else {
-      onNavigate(lat, lng);
-    }
+    onLocationPick(lat, lng);
   };
 
   const chevron = (open: boolean) => (
@@ -584,22 +574,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           </div>
         )}
       </div>
-
-      {/* Current/Last Position */}
-      {currentPosition && (
-        <div className="section" style={{ padding: '8px 12px', background: 'rgba(108, 140, 255, 0.08)', borderRadius: 6 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6c8cff" strokeWidth="2">
-              <circle cx="12" cy="10" r="3" />
-              <path d="M12 2a8 8 0 00-8 8c0 5.4 8 12 8 12s8-6.6 8-12a8 8 0 00-8-8z" />
-            </svg>
-            <span style={{ opacity: 0.6 }}>{t('panel.current_position')}:</span>
-            <span style={{ fontFamily: 'monospace', color: '#6c8cff' }}>
-              {currentPosition.lat.toFixed(6)}, {currentPosition.lng.toFixed(6)}
-            </span>
-          </div>
-        </div>
-      )}
 
       {/* Library entry button (bookmarks + saved routes) */}
       <div className="section">

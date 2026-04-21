@@ -18,6 +18,8 @@ export const STRINGS = {
   'generic.resume': { zh: '繼續', en: 'Resume' },
   'generic.clear': { zh: '清除', en: 'Clear' },
   'generic.add': { zh: '加入', en: 'Add' },
+  'generic.preview': { zh: '定位', en: 'Preview' },
+  'generic.none': { zh: '無', en: 'None' },
   'generic.km_h': { zh: 'km/h', en: 'km/h' },
 
   // ── Status bar ───────────────────────────────
@@ -37,6 +39,7 @@ export const STRINGS = {
   'status.open_log_tooltip': { zh: '開啟 log 資料夾,方便將 backend.log 附到 Issue', en: 'Open the log folder so you can attach backend.log to an Issue' },
   'status.open_log_failed': { zh: '無法開啟 log', en: 'Failed to open log' },
   'status.copy_coord': { zh: '複製座標', en: 'Copy coordinates' },
+  'status.last_position': { zh: '最後定位', en: 'Last Position' },
 
   // ── Modes ────────────────────────────────────
   'mode.teleport': { zh: '瞬間移動', en: 'Teleport' },
@@ -199,7 +202,7 @@ export const STRINGS = {
   // ── Panel extras ────────────────────────────
   'panel.mode': { zh: '模式', en: 'Mode' },
   'panel.address_search': { zh: '地址搜尋', en: 'Address Search' },
-  'panel.current_position': { zh: '目前座標', en: 'Current Position' },
+  'panel.current_position': { zh: '最後定位', en: 'Last Position' },
   'panel.library': { zh: '收藏座標與路線', en: 'Bookmarks & Routes' },
   'panel.library_drag_hint': { zh: '收藏座標與路線 · 拖曳此處移動', en: 'Bookmarks & Routes · Drag to move' },
   'panel.bookmarks_count': { zh: '座標收藏', en: 'Bookmarks' },
@@ -231,6 +234,7 @@ export const STRINGS = {
   'bm.add': { zh: '新增收藏', en: 'Add Bookmark' },
   'bm.add_custom': { zh: '自訂座標收藏', en: 'Custom Coordinates' },
   'bm.add_custom_tooltip': { zh: '手動輸入經緯度新增收藏', en: 'Add a bookmark by typing latitude / longitude' },
+  'bm.note_placeholder': { zh: '備註 note', en: 'Note' },
   'bm.lat_placeholder': { zh: '緯度 lat', en: 'Latitude' },
   'bm.lng_placeholder': { zh: '經度 lng', en: 'Longitude' },
   'bm.manage_categories': { zh: '管理分類', en: 'Manage Categories' },
@@ -248,6 +252,7 @@ export const STRINGS = {
   'bm.blank': { zh: '空白', en: 'Empty' },
   'bm.empty': { zh: '尚無收藏', en: 'No bookmarks' },
   'bm.edit': { zh: '編輯', en: 'Edit' },
+  'bm.delete_confirm': { zh: '要刪除 {name} 嗎？', en: 'Delete {name}?' },
   'bm.move_to': { zh: '移動到:', en: 'Move to:' },
 
   // ── Address search ───────────────────────────
@@ -262,6 +267,8 @@ export const STRINGS = {
 
   // ── Map extras ──────────────────────────────
   'map.destination': { zh: '目的地', en: 'Destination' },
+  'map.selected_target': { zh: '已選目標', en: 'Selected target' },
+  'map.add_waypoint_here': { zh: '加入路線點', en: 'Add waypoint' },
 
   // ── Pause settings ──────────────────────────
   'pause.multi_stop': { zh: '每站隨機暫停', en: 'Random pause at each stop' },

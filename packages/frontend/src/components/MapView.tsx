@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useT } from '../i18n';
 import L from 'leaflet';
+import { SimMode } from '../hooks/useSimulation';
 
 interface Position {
   lat: number;
@@ -22,14 +23,20 @@ interface ContextMenuState {
 }
 
 interface MapViewProps {
+  activeMode: SimMode;
   currentPosition: Position | null;
   destination: Position | null;
+  selectedTarget?: Position | null;
+  recenterToCurrentSignal?: number;
   waypoints: Waypoint[];
   routePath: Position[];
   randomWalkRadius: number | null;
   onMapClick: (lat: number, lng: number) => void;
   onTeleport: (lat: number, lng: number) => void;
   onNavigate: (lat: number, lng: number) => void;
+  onLocationPick: (lat: number, lng: number, meta?: { label?: string; source?: string }) => void;
+  onCancelTarget?: () => void;
+  onAddTargetWaypoint?: (lat: number, lng: number) => void;
   onAddBookmark: (lat: number, lng: number) => void;
   onAddWaypoint?: (lat: number, lng: number) => void;
   showWaypointOption?: boolean;
@@ -38,14 +45,20 @@ interface MapViewProps {
 }
 
 const MapView: React.FC<MapViewProps> = ({
+  activeMode,
   currentPosition,
   destination,
+  selectedTarget,
+  recenterToCurrentSignal = 0,
   waypoints,
   routePath,
   randomWalkRadius,
   onMapClick,
   onTeleport,
   onNavigate,
+  onLocationPick,
+  onCancelTarget,
+  onAddTargetWaypoint,
   onAddBookmark,
   onAddWaypoint,
   showWaypointOption,
@@ -270,10 +283,48 @@ const MapView: React.FC<MapViewProps> = ({
         icon: redIcon,
       }).addTo(map);
 
-      marker.bindTooltip(t('map.destination'), { direction: 'top', offset: [0, -48] });
+      marker.bindTooltip(selectedTarget ? t('map.selected_target') : t('map.destination'), { direction: 'top', offset: [0, -48] });
+      if (selectedTarget) {
+        const openTargetMenu = (ev?: L.LeafletMouseEvent) => {
+          const latlng = ev?.latlng ?? L.latLng(destination.lat, destination.lng);
+          const pt = map.latLngToContainerPoint(latlng);
+          const rect = map.getContainer().getBoundingClientRect();
+          setContextMenu({
+            visible: true,
+            x: rect.left + pt.x,
+            y: rect.top + pt.y,
+            lat: latlng.lat,
+            lng: latlng.lng,
+          });
+        };
+        marker.on('contextmenu', (ev: L.LeafletMouseEvent) => {
+          L.DomEvent.stop(ev);
+          openTargetMenu(ev);
+        });
+        marker.on('click', () => {
+          marker.openTooltip();
+        });
+      }
       destMarkerRef.current = marker;
     }
-  }, [destination]);
+  }, [destination, selectedTarget, t]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !selectedTarget) return;
+    map.setView([selectedTarget.lat, selectedTarget.lng], Math.max(map.getZoom(), 16), {
+      animate: true,
+    });
+  }, [selectedTarget]);
+
+  useEffect(() => {
+    if (!recenterToCurrentSignal) return;
+    const map = mapRef.current;
+    if (!map || !currentPosition) return;
+    map.setView([currentPosition.lat, currentPosition.lng], Math.max(map.getZoom(), 16), {
+      animate: true,
+    });
+  }, [recenterToCurrentSignal, currentPosition]);
 
   // Update waypoint markers
   const waypointSigRef = useRef<string>('');
@@ -411,7 +462,7 @@ const MapView: React.FC<MapViewProps> = ({
       if (onShowToast) onShowToast(tRef.current('panel.coord_invalid'));
       return;
     }
-    onTeleport(parsed.lat, parsed.lng);
+    onLocationPick(parsed.lat, parsed.lng, { source: 'coord' });
     setCoordInput('');
   };
 
@@ -516,14 +567,27 @@ const MapView: React.FC<MapViewProps> = ({
         <button
           onClick={submitCoordGo}
           disabled={!coordInput.trim() || !deviceConnected}
-          title={t('map.teleport_here')}
+          title={t('generic.preview')}
           style={{
             background: !coordInput.trim() || !deviceConnected ? 'rgba(108,140,255,0.3)' : '#6c8cff',
             color: '#fff', border: 'none', borderRadius: 4,
             padding: '4px 10px', fontSize: 11, fontWeight: 600,
             cursor: !coordInput.trim() || !deviceConnected ? 'not-allowed' : 'pointer',
           }}
-        >Go</button>
+        >{tRef.current('generic.preview')}</button>
+        {selectedTarget && (
+          <button
+            onClick={() => onCancelTarget?.()}
+            style={{
+              background: 'rgba(255,255,255,0.08)',
+              color: '#c7d0e4', border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: 4, padding: '4px 8px', fontSize: 11, fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            {tRef.current('generic.clear')}
+          </button>
+        )}
       </div>
 
       {contextMenu.visible && (

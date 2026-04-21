@@ -36,7 +36,9 @@ class RestoreHandler:
         except Exception:
             logger.exception("Failed to clear device location")
 
-        # Reset engine state (keep current_position so user can restart without teleporting)
+        # Reset engine state completely so UI and backend agree that the
+        # last simulated position has been cleared.
+        engine.current_position = None
         engine.distance_traveled = 0.0
         engine.distance_remaining = 0.0
         engine.lap_count = 0
