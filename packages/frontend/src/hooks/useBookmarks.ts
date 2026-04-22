@@ -7,6 +7,7 @@ export interface Bookmark {
   lat: number
   lng: number
   category_id?: string
+  address?: string
   note?: string
   created_at?: string
 }

@@ -7,6 +7,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from config import BOOKMARKS_FILE
 from models.schemas import Bookmark, BookmarkCategory, BookmarkStore
@@ -18,6 +19,109 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+GROUP_ORDER = [
+    ("default", "預設"),
+    ("postcards_flower", "明信片花點"),
+    ("postcards_mushroom", "明信片菇點"),
+    ("postcards_hidden", "隱藏明信片"),
+    ("decorations_pure", "裝飾純點"),
+]
+
+NAME_TO_ID = {name: cat_id for cat_id, name in GROUP_ORDER}
+ID_TO_NAME = {cat_id: name for cat_id, name in GROUP_ORDER}
+
+
+def _new_category(cat_id: str, name: str, sort_order: int) -> BookmarkCategory:
+    return BookmarkCategory(
+        id=cat_id,
+        name=name,
+        color="#6c8cff",
+        sort_order=sort_order,
+        created_at=_now_iso(),
+    )
+
+
+def _empty_store() -> BookmarkStore:
+    return BookmarkStore(
+        categories=[_new_category(cat_id, name, idx) for idx, (cat_id, name) in enumerate(GROUP_ORDER)],
+        bookmarks=[],
+    )
+
+
+def _group_for_bookmark(bm: Bookmark) -> str:
+    name = (bm.category_id or "").strip()
+    if name in NAME_TO_ID:
+        return name
+    if name in ID_TO_NAME:
+        return ID_TO_NAME[name]
+    return "預設"
+
+
+def _serialize_grouped(store: BookmarkStore) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {name: [] for _, name in GROUP_ORDER}
+
+    cat_name_by_id = {c.id: c.name for c in store.categories}
+    for bm in store.bookmarks:
+        cat_name = cat_name_by_id.get(bm.category_id, "預設")
+        grouped.setdefault(cat_name, []).append(
+            {
+                "name": bm.name,
+                "lat": bm.lat,
+                "lng": bm.lng,
+                "address": bm.address,
+                "note": bm.note,
+            }
+        )
+
+    # Keep any unexpected categories instead of dropping data.
+    for cat in store.categories:
+        grouped.setdefault(cat.name, [])
+
+    return grouped
+
+
+def _load_old_style(data: dict[str, Any]) -> BookmarkStore:
+    return BookmarkStore(**data)
+
+
+def _load_grouped_style(data: dict[str, Any]) -> BookmarkStore:
+    store = _empty_store()
+    categories_by_name = {c.name: c for c in store.categories}
+    bookmarks: list[Bookmark] = []
+
+    for idx, (cat_name, items) in enumerate(data.items()):
+        if not isinstance(items, list):
+            continue
+        cat = categories_by_name.get(cat_name)
+        if cat is None:
+            cat = _new_category(cat_name, cat_name, len(store.categories) + idx)
+            store.categories.append(cat)
+            categories_by_name[cat_name] = cat
+
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            try:
+                bookmarks.append(
+                    Bookmark(
+                        id=str(uuid.uuid4()),
+                        name=str(item.get("name", "")).strip(),
+                        lat=float(item.get("lat")),
+                        lng=float(item.get("lng")),
+                        address=str(item.get("address", "") or ""),
+                        note=str(item.get("note", "") or ""),
+                        category_id=cat.id,
+                        created_at=_now_iso(),
+                        last_used_at=_now_iso(),
+                    )
+                )
+            except Exception:
+                logger.warning("Skipping invalid grouped bookmark item in %s", cat_name)
+
+    store.bookmarks = bookmarks
+    return store
+
+
 class BookmarkManager:
     """CRUD manager for bookmarks and categories.
 
@@ -26,18 +130,7 @@ class BookmarkManager:
     """
 
     def __init__(self) -> None:
-        self.store = BookmarkStore(
-            categories=[
-                BookmarkCategory(
-                    id="default",
-                    name="預設",
-                    color="#6c8cff",
-                    sort_order=0,
-                    created_at=_now_iso(),
-                )
-            ],
-            bookmarks=[],
-        )
+        self.store = _empty_store()
         self._load()
 
     # ------------------------------------------------------------------
@@ -54,7 +147,12 @@ class BookmarkManager:
         try:
             raw = path.read_text(encoding="utf-8")
             data = json.loads(raw)
-            self.store = BookmarkStore(**data)
+            if isinstance(data, dict) and "categories" in data and "bookmarks" in data:
+                self.store = _load_old_style(data)
+            elif isinstance(data, dict):
+                self.store = _load_grouped_style(data)
+            else:
+                raise ValueError("unsupported bookmark JSON shape")
             logger.info(
                 "Loaded %d bookmarks in %d categories",
                 len(self.store.bookmarks),
@@ -69,8 +167,8 @@ class BookmarkManager:
         path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            raw = self.store.model_dump_json(indent=2)
-            path.write_text(raw, encoding="utf-8")
+            raw = json.dumps(_serialize_grouped(self.store), ensure_ascii=False, indent=2)
+            path.write_text(raw + "\n", encoding="utf-8")
         except Exception as exc:
             logger.error("Failed to save bookmarks: %s", exc)
 
@@ -86,7 +184,7 @@ class BookmarkManager:
         """Create and return a new category."""
         max_order = max((c.sort_order for c in self.store.categories), default=-1)
         cat = BookmarkCategory(
-            id=str(uuid.uuid4()),
+            id=NAME_TO_ID.get(name, str(uuid.uuid4())),
             name=name,
             color=color,
             sort_order=max_order + 1,
@@ -234,7 +332,7 @@ class BookmarkManager:
 
     def export_json(self) -> str:
         """Serialise the entire store to a JSON string."""
-        return self.store.model_dump_json(indent=2)
+        return json.dumps(_serialize_grouped(self.store), ensure_ascii=False, indent=2)
 
     def import_json(self, data: str) -> int:
         """Import bookmarks (and optionally categories) from a JSON string.
@@ -244,7 +342,13 @@ class BookmarkManager:
         Returns the number of bookmarks imported.
         """
         try:
-            incoming = BookmarkStore(**json.loads(data))
+            raw = json.loads(data)
+            if isinstance(raw, dict) and "categories" in raw and "bookmarks" in raw:
+                incoming = BookmarkStore(**raw)
+            elif isinstance(raw, dict):
+                incoming = _load_grouped_style(raw)
+            else:
+                raise ValueError("unsupported bookmark JSON shape")
         except Exception as exc:
             logger.error("Invalid bookmark JSON: %s", exc)
             return 0

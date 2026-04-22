@@ -8,6 +8,7 @@ interface Bookmark {
   lat: number;
   lng: number;
   category: string;
+  address?: string;
   note?: string;
 }
 
@@ -489,28 +490,23 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                     />
                   ) : (
                     <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {bm.name}
+                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: 13, fontWeight: 600 }}>
+                        {bm.address ? `(${bm.address})${bm.name}` : bm.name}
                       </span>
-                      {bm.note && (
-                        <span
-                          style={{
-                            fontSize: 10,
-                            opacity: 0.72,
-                            lineHeight: 1.3,
-                            marginTop: 2,
-                            display: '-webkit-box',
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: 'vertical',
-                            overflow: 'hidden',
-                            whiteSpace: 'normal',
-                          }}
-                        >
-                          {bm.note}
-                        </span>
-                      )}
-                      <span style={{ fontSize: 10, opacity: 0.55, fontFamily: 'monospace' }}>
-                        {bm.lat.toFixed(5)}, {bm.lng.toFixed(5)}
+                      <span
+                        style={{
+                          fontSize: 10,
+                          opacity: 0.72,
+                          lineHeight: 1.3,
+                          marginTop: 2,
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                          whiteSpace: 'normal',
+                        }}
+                      >
+                        {bm.note || ' '}
                       </span>
                     </div>
                   )}

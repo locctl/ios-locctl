@@ -466,6 +466,7 @@ const App: React.FC = () => {
             lat: b.lat,
             lng: b.lng,
             category: bm.categories.find(c => c.id === b.category_id)?.name || t('bm.default'),
+            address: (b as any).address || '',
             note: b.note || '',
           }))}
           bookmarkCategories={bm.categories.map(c => c.name)}
