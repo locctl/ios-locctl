@@ -37,7 +37,7 @@ interface MapViewProps {
   onLocationPick: (lat: number, lng: number, meta?: { label?: string; source?: string }) => void;
   onCancelTarget?: () => void;
   onAddTargetWaypoint?: (lat: number, lng: number) => void;
-  onAddBookmark: (lat: number, lng: number) => void;
+  onRequestBookmarkCreateAt: (lat: number, lng: number) => void;
   onAddWaypoint?: (lat: number, lng: number) => void;
   showWaypointOption?: boolean;
   deviceConnected?: boolean;
@@ -59,7 +59,7 @@ const MapView: React.FC<MapViewProps> = ({
   onLocationPick,
   onCancelTarget,
   onAddTargetWaypoint,
-  onAddBookmark,
+  onRequestBookmarkCreateAt,
   onAddWaypoint,
   showWaypointOption,
   deviceConnected = true,
@@ -719,7 +719,7 @@ const MapView: React.FC<MapViewProps> = ({
             onMouseEnter={highlightItem}
             onMouseLeave={unhighlightItem}
             onClick={() => {
-              onAddBookmark(contextMenu.lat, contextMenu.lng);
+              onRequestBookmarkCreateAt(contextMenu.lat, contextMenu.lng);
               closeContextMenu();
             }}
           >

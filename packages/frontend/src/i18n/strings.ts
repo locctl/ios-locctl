@@ -235,6 +235,7 @@ export const STRINGS = {
   'bm.add_custom': { zh: '自訂座標收藏', en: 'Custom Coordinates' },
   'bm.add_custom_tooltip': { zh: '手動輸入經緯度新增收藏', en: 'Add a bookmark by typing latitude / longitude' },
   'bm.note_placeholder': { zh: '備註 note', en: 'Note' },
+  'bm.address_placeholder': { zh: '地址 address', en: 'Address' },
   'bm.lat_placeholder': { zh: '緯度 lat', en: 'Latitude' },
   'bm.lng_placeholder': { zh: '經度 lng', en: 'Longitude' },
   'bm.manage_categories': { zh: '管理分類', en: 'Manage Categories' },

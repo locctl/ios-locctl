@@ -44,6 +44,8 @@ interface Bookmark {
   lat: number;
   lng: number;
   category: string;
+  address?: string;
+  note?: string;
 }
 
 interface SavedRoute {
@@ -79,9 +81,9 @@ interface ControlPanelProps {
   bookmarks: Bookmark[];
   bookmarkCategories: string[];
   onBookmarkClick: (bm: Bookmark) => void;
-  onBookmarkAdd: (bm: Bookmark) => void;
+  onOpenBookmarkCreate: (lat?: number, lng?: number) => void;
   onBookmarkDelete: (id: string) => void;
-  onBookmarkEdit: (id: string, bm: Partial<Bookmark>) => void;
+  onBookmarkEdit: (bm: Bookmark) => void;
   onCategoryAdd: (name: string) => void;
   onCategoryDelete: (name: string) => void;
   onBookmarkImport?: (file: File) => Promise<void>;
@@ -198,7 +200,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   bookmarks,
   bookmarkCategories,
   onBookmarkClick,
-  onBookmarkAdd,
+  onOpenBookmarkCreate,
   onBookmarkDelete,
   onBookmarkEdit,
   onCategoryAdd,
@@ -646,7 +648,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   categories={bookmarkCategories}
                   currentPosition={currentPosition}
                   onBookmarkClick={(b) => { onBookmarkClick(b); setLibraryOpen(false); }}
-                  onBookmarkAdd={onBookmarkAdd}
+                  onOpenBookmarkCreate={onOpenBookmarkCreate}
                   onBookmarkDelete={onBookmarkDelete}
                   onBookmarkEdit={onBookmarkEdit}
                   onCategoryAdd={onCategoryAdd}

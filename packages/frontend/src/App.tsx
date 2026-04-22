@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useEffect } from 'react'
-import { createPortal } from 'react-dom'
 import { useT } from './i18n'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useDevice } from './hooks/useDevice'
@@ -15,6 +14,7 @@ import JoystickPad from './components/JoystickPad'
 import EtaBar from './components/EtaBar'
 import PauseControl from './components/PauseControl'
 import StatusBar from './components/StatusBar'
+import BookmarkDialog, { type BookmarkDialogValue } from './components/BookmarkDialog'
 
 import { SimMode, MoveMode } from './hooks/useSimulation'
 
@@ -23,6 +23,8 @@ const SPEED_MAP: Record<MoveMode, number> = {
   running: 10,
   driving: 40,
 }
+
+const roundCoord6 = (n: number) => Number(n.toFixed(6))
 
 const App: React.FC = () => {
   const t = useT()
@@ -39,6 +41,11 @@ const App: React.FC = () => {
   const [toastMsg, setToastMsg] = useState<string | null>(null)
   const [selectedTarget, setSelectedTarget] = useState<{ lat: number; lng: number; label?: string; source?: string } | null>(null)
   const [recenterToCurrentSignal, setRecenterToCurrentSignal] = useState(0)
+  const [bookmarkDialog, setBookmarkDialog] = useState<{
+    mode: 'create' | 'edit'
+    id?: string
+    value: BookmarkDialogValue
+  } | null>(null)
 
   const showToast = useCallback((msg: string, ms = 2000) => {
     setToastMsg(msg)
@@ -200,28 +207,68 @@ const App: React.FC = () => {
     setRecenterToCurrentSignal((prev) => prev + 1)
   }, [])
 
-  const [addBmDialog, setAddBmDialog] = useState<{ lat: number; lng: number; name: string; category: string } | null>(null)
-
-  const handleAddBookmark = useCallback((lat: number, lng: number) => {
-    setAddBmDialog({
-      lat,
-      lng,
-      name: '',
-      category: bm.categories[0]?.name || t('bm.default'),
+  const openBookmarkCreateDialog = useCallback((lat?: number, lng?: number) => {
+    setBookmarkDialog({
+      mode: 'create',
+      value: {
+        name: '',
+        address: '',
+        note: '',
+        lat: lat != null ? String(roundCoord6(lat)) : '',
+        lng: lng != null ? String(roundCoord6(lng)) : '',
+        category: bm.categories[0]?.name || t('bm.default'),
+      },
     })
-  }, [bm.categories])
+  }, [bm.categories, t])
 
-  const submitAddBookmark = useCallback(() => {
-    if (!addBmDialog || !addBmDialog.name.trim()) return
-    const cat = bm.categories.find(c => c.name === addBmDialog.category)
-    bm.createBookmark({
-      name: addBmDialog.name.trim(),
-      lat: addBmDialog.lat,
-      lng: addBmDialog.lng,
-      category_id: cat?.id || 'default',
+  const openBookmarkEditDialog = useCallback((bookmark: any) => {
+    setBookmarkDialog({
+      mode: 'edit',
+      id: bookmark.id,
+      value: {
+        name: bookmark.name || '',
+        address: bookmark.address || '',
+        note: bookmark.note || '',
+        lat: bookmark.lat != null ? String(roundCoord6(bookmark.lat)) : '',
+        lng: bookmark.lng != null ? String(roundCoord6(bookmark.lng)) : '',
+        category: bookmark.category || bm.categories[0]?.name || t('bm.default'),
+      },
     })
-    setAddBmDialog(null)
-  }, [addBmDialog, bm])
+  }, [bm.categories, t])
+
+  const submitBookmarkDialog = useCallback(async () => {
+    if (!bookmarkDialog) return
+    const { value } = bookmarkDialog
+    const name = value.name.trim()
+    const lat = parseFloat(value.lat)
+    const lng = parseFloat(value.lng)
+    if (!name || !Number.isFinite(lat) || !Number.isFinite(lng)) return
+    const cat = bm.categories.find(c => c.name === value.category)
+    try {
+      if (bookmarkDialog.mode === 'edit' && bookmarkDialog.id) {
+        await bm.updateBookmark(bookmarkDialog.id, {
+          name,
+          lat,
+          lng,
+          address: value.address.trim(),
+          note: value.note.trim(),
+          category_id: cat?.id || 'default',
+        })
+      } else {
+        await bm.createBookmark({
+          name,
+          lat,
+          lng,
+          address: value.address.trim(),
+          note: value.note.trim(),
+          category_id: cat?.id || 'default',
+        })
+      }
+      setBookmarkDialog(null)
+    } catch (err) {
+      console.error('Failed to save bookmark:', err)
+    }
+  }, [bookmarkDialog, bm])
 
   const handleAddWaypoint = useCallback((lat: number, lng: number) => {
     // Seed the list with the current device position as the implicit start
@@ -471,12 +518,9 @@ const App: React.FC = () => {
           }))}
           bookmarkCategories={bm.categories.map(c => c.name)}
           onBookmarkClick={(b: any) => handleSelectTarget(b.lat, b.lng, { label: b.name, source: 'bookmark' })}
-          onBookmarkAdd={(b: any) => {
-            const cat = bm.categories.find(c => c.name === b.category)
-            bm.createBookmark({ name: b.name, lat: b.lat, lng: b.lng, category_id: cat?.id || 'default' })
-          }}
+          onOpenBookmarkCreate={openBookmarkCreateDialog}
           onBookmarkDelete={(id: string) => bm.deleteBookmark(id)}
-          onBookmarkEdit={(id: string, data: any) => bm.updateBookmark(id, data)}
+          onBookmarkEdit={openBookmarkEditDialog}
           onCategoryAdd={(name: string) => bm.createCategory({ name, color: '#6c8cff' })}
           onCategoryDelete={(name: string) => {
             const cat = bm.categories.find(c => c.name === name)
@@ -704,7 +748,7 @@ const App: React.FC = () => {
           onLocationPick={handleSelectTarget}
           onCancelTarget={handleCancelTarget}
           onAddTargetWaypoint={handleAddWaypointTarget}
-          onAddBookmark={handleAddBookmark}
+          onRequestBookmarkCreateAt={openBookmarkCreateDialog}
           onAddWaypoint={handleAddWaypoint}
           showWaypointOption={sim.mode === SimMode.Loop || sim.mode === SimMode.MultiStop || sim.mode === SimMode.Navigate}
           deviceConnected={device.connectedDevice !== null}
@@ -718,61 +762,24 @@ const App: React.FC = () => {
             onRelease={() => joystick.updateFromPad(0, 0)}
           />
         )}
-        {addBmDialog && createPortal(
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="anim-scale-in"
-            style={{
-              position: 'fixed', top: 60, left: '50%', transform: 'translateX(-50%)',
-              zIndex: 1000, background: 'rgba(26, 29, 39, 0.96)',
-              backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
-              border: '1px solid rgba(108, 140, 255, 0.2)',
-              borderRadius: 12, padding: 16, width: 300,
-              boxShadow: '0 20px 60px rgba(12, 18, 40, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05) inset',
-            }}
-          >
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{t('bm.add')}</div>
-            <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 8 }}>
-              {addBmDialog.lat.toFixed(5)}, {addBmDialog.lng.toFixed(5)}
-            </div>
-            <input
-              type="text"
-              className="search-input"
-              placeholder={t('bm.name_placeholder')}
-              autoFocus
-              value={addBmDialog.name}
-              onChange={(e) => setAddBmDialog({ ...addBmDialog, name: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') submitAddBookmark()
-                if (e.key === 'Escape') setAddBmDialog(null)
-              }}
-              style={{ width: '100%', marginBottom: 8 }}
-            />
-            <select
-              value={addBmDialog.category}
-              onChange={(e) => setAddBmDialog({ ...addBmDialog, category: e.target.value })}
-              style={{
-                width: '100%', marginBottom: 10, padding: '6px 8px',
-                background: '#1e1e22', color: '#e0e0e0', border: '1px solid #444',
-                borderRadius: 4, fontSize: 12,
-              }}
-            >
-              {bm.categories.map((c) => (
-                <option key={c.id} value={c.name}>{c.name}</option>
-              ))}
-            </select>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button
-                className="action-btn primary"
-                style={{ flex: 1 }}
-                disabled={!addBmDialog.name.trim()}
-                onClick={submitAddBookmark}
-              >{t('generic.add')}</button>
-              <button className="action-btn" onClick={() => setAddBmDialog(null)}>{t('generic.cancel')}</button>
-            </div>
-          </div>,
-          document.body,
-        )}
+        <BookmarkDialog
+          open={bookmarkDialog !== null}
+          mode={bookmarkDialog?.mode ?? 'create'}
+          categories={bm.categories.map(c => c.name)}
+          value={bookmarkDialog?.value ?? {
+            name: '',
+            address: '',
+            note: '',
+            lat: '',
+            lng: '',
+            category: bm.categories[0]?.name || t('bm.default'),
+          }}
+          onChange={(value) => {
+            setBookmarkDialog((prev) => prev ? { ...prev, value } : prev)
+          }}
+          onSave={submitBookmarkDialog}
+          onCancel={() => setBookmarkDialog(null)}
+        />
         {sim.error && (
           <div
             style={{

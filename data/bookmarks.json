@@ -334,6 +334,13 @@
       "note": ""
     },
     {
+      "name": "金剛輪寺 三重塔",
+      "lat": 35.161758,
+      "lng": 136.283008,
+      "address": "日本",
+      "note": ""
+    },
+    {
       "name": "羚羊谷",
       "lat": 36.86224808678582,
       "lng": -111.3743924897564,
@@ -345,6 +352,13 @@
       "lat": 29.975283,
       "lng": 31.137795,
       "address": "埃及",
+      "note": ""
+    },
+    {
+      "name": "溫德米爾湖 Ambleside Pier",
+      "lat": 54.41996119679964,
+      "lng": -2.9623096095689014,
+      "address": "英國",
       "note": ""
     },
     {
@@ -373,6 +387,62 @@
       "lat": 47.554658845563814,
       "lng": 3.1674209837148237,
       "address": "法國 Treigny",
+      "note": ""
+    },
+    {
+      "name": "St John's Church",
+      "lat": 44.7408,
+      "lng": -81.1378,
+      "address": "加拿大安大略省",
+      "note": ""
+    },
+    {
+      "name": "Calgary Alberta Temple",
+      "lat": 51.140371,
+      "lng": -114.231806,
+      "address": "加拿大亞伯達省",
+      "note": ""
+    },
+    {
+      "name": "那谷寺 本堂大悲閣",
+      "lat": 36.311598,
+      "lng": 136.421354,
+      "address": "日本石川縣",
+      "note": ""
+    },
+    {
+      "name": "Desdentado",
+      "lat": 38.11012,
+      "lng": -0.93022,
+      "address": "西班牙阿利坎特省",
+      "note": ""
+    },
+    {
+      "name": "Zugspitze",
+      "lat": 47.414722,
+      "lng": 10.980183,
+      "address": "德國巴伐利亞州",
+      "note": ""
+    },
+    {
+      "name": "Roses of Light",
+      "lat": 37.5501801,
+      "lng": 127.1590873,
+      "address": "韓國首爾特別市",
+      "note": ""
+    },
+    {
+      "name": "Bockwindmühle Gatow",
+      "lat": 52.484918,
+      "lng": 13.180243,
+      "address": "德國柏林",
+      "note": ""
+    },
+    {
+      "name": "White Deer (Oshika)",
+      "lat": 38.375273,
+      "lng": 141.439801,
+      "address": "日本宮城縣",
       "note": ""
     }
   ],

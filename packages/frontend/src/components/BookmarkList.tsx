@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useState } from 'react';
 import { useT } from '../i18n';
 
 interface Bookmark {
@@ -22,9 +21,9 @@ interface BookmarkListProps {
   categories: string[];
   currentPosition: Position | null;
   onBookmarkClick: (bm: Bookmark) => void;
-  onBookmarkAdd: (bm: Bookmark) => void;
+  onOpenBookmarkCreate: (lat?: number, lng?: number) => void;
   onBookmarkDelete: (id: string) => void;
-  onBookmarkEdit: (id: string, bm: Partial<Bookmark>) => void;
+  onBookmarkEdit: (bm: Bookmark) => void;
   onCategoryAdd: (name: string) => void;
   onCategoryDelete: (name: string) => void;
   onImport?: (file: File) => Promise<void>;
@@ -55,7 +54,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   categories,
   currentPosition,
   onBookmarkClick,
-  onBookmarkAdd,
+  onOpenBookmarkCreate,
   onBookmarkDelete,
   onBookmarkEdit,
   onCategoryAdd,
@@ -68,78 +67,11 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   // Translate at render time so EN users see "Default" without touching storage.
   const displayCat = (name: string) => (name === '預設' ? t('bm.default') : name);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const [showAddDialog, setShowAddDialog] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newNote, setNewNote] = useState('');
-  const [newCategory, setNewCategory] = useState(categories[0] || 'Default');
   const [showCategoryMgr, setShowCategoryMgr] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
-  const [contextMenu, setContextMenu] = useState<{ bm: Bookmark; x: number; y: number } | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState('');
-  const [showCustomDialog, setShowCustomDialog] = useState(false);
-  const [customName, setCustomName] = useState('');
-  const [customNote, setCustomNote] = useState('');
-  const [customLat, setCustomLat] = useState('');
-  const [customLng, setCustomLng] = useState('');
-  const [customCategory, setCustomCategory] = useState(categories[0] || 'Default');
-
-  // Close the context menu on any document click outside of it.
-  // Using a document-level listener (instead of a full-screen overlay div)
-  // avoids the bug where a stuck overlay blocks all user interaction.
-  useEffect(() => {
-    if (!contextMenu) return;
-    const handler = (e: MouseEvent) => {
-      const target = e.target as Element | null;
-      if (target && target.closest?.('[data-bookmark-context-menu]')) return;
-      setContextMenu(null);
-    };
-    // defer to next tick so the opening right-click doesn't close it instantly
-    const id = setTimeout(() => {
-      document.addEventListener('click', handler);
-      document.addEventListener('contextmenu', handler);
-    }, 0);
-    return () => {
-      clearTimeout(id);
-      document.removeEventListener('click', handler);
-      document.removeEventListener('contextmenu', handler);
-    };
-  }, [contextMenu]);
 
   const toggleCategory = (cat: string) => {
     setCollapsed((prev) => ({ ...prev, [cat]: !prev[cat] }));
-  };
-
-  const handleAddBookmark = () => {
-    if (!newName.trim() || !currentPosition) return;
-    onBookmarkAdd({
-      name: newName.trim(),
-      note: newNote.trim(),
-      lat: currentPosition.lat,
-      lng: currentPosition.lng,
-      category: newCategory,
-    });
-    setNewName('');
-    setNewNote('');
-    setShowAddDialog(false);
-  };
-
-  const handleAddCustom = () => {
-    const name = customName.trim();
-    const lat = parseFloat(customLat);
-    const lng = parseFloat(customLng);
-    if (!name) return;
-    if (!Number.isFinite(lat) || lat < -90 || lat > 90) return;
-    if (!Number.isFinite(lng) || lng < -180 || lng > 180) return;
-    onBookmarkAdd({ name, note: customNote.trim(), lat, lng, category: customCategory });
-    setCustomName(''); setCustomNote(''); setCustomLat(''); setCustomLng('');
-    setShowCustomDialog(false);
-  };
-
-  const handleContextMenu = (e: React.MouseEvent, bm: Bookmark) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setContextMenu({ bm, x: e.clientX, y: e.clientY });
   };
 
   const bookmarksByCategory = categories.reduce<Record<string, Bookmark[]>>((acc, cat) => {
@@ -159,7 +91,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
         <button
           className="action-btn"
-          onClick={() => setShowAddDialog(!showAddDialog)}
+          onClick={() => onOpenBookmarkCreate(currentPosition?.lat, currentPosition?.lng)}
           style={{ padding: '3px 8px', fontSize: 12 }}
           title={t('bm.add_here')}
         >
@@ -168,21 +100,6 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
           {t('bm.add')}
-        </button>
-        <button
-          className="action-btn"
-          onClick={() => {
-            setCustomCategory(categories[0] || 'Default');
-            setShowCustomDialog(true);
-          }}
-          style={{ padding: '3px 8px', fontSize: 12 }}
-          title={t('bm.add_custom_tooltip')}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="10" r="3" />
-            <path d="M12 2a8 8 0 00-8 8c0 6 8 12 8 12s8-6 8-12a8 8 0 00-8-8z" />
-          </svg>
-          {t('bm.add_custom')}
         </button>
         {exportUrl && (
           <a
@@ -236,69 +153,6 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
           </svg>
         </button>
       </div>
-
-      {/* Add bookmark dialog */}
-      {showAddDialog && (
-        <div
-          style={{
-            background: '#2a2a2e',
-            border: '1px solid #444',
-            borderRadius: 6,
-            padding: 12,
-            marginBottom: 8,
-          }}
-        >
-          <input
-            type="text"
-            className="search-input"
-            placeholder={t('bm.name_placeholder')}
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            style={{ width: '100%', marginBottom: 8 }}
-            autoFocus
-          />
-          <textarea
-            className="search-input"
-            placeholder={t('bm.note_placeholder')}
-            value={newNote}
-            onChange={(e) => setNewNote(e.target.value)}
-            style={{ width: '100%', marginBottom: 8, minHeight: 64, resize: 'vertical' }}
-          />
-          <select
-            value={newCategory}
-            onChange={(e) => setNewCategory(e.target.value)}
-            style={{
-              width: '100%',
-              marginBottom: 8,
-              padding: '6px 8px',
-              background: '#1e1e22',
-              color: '#e0e0e0',
-              border: '1px solid #444',
-              borderRadius: 4,
-              fontSize: 12,
-            }}
-          >
-            {categories.map((cat) => (
-              <option key={cat} value={cat}>
-                {displayCat(cat)}
-              </option>
-            ))}
-          </select>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button className="action-btn primary" onClick={handleAddBookmark} style={{ flex: 1, fontSize: 12 }}>
-              {t('generic.save')}
-            </button>
-            <button className="action-btn" onClick={() => setShowAddDialog(false)} style={{ fontSize: 12 }}>
-              {t('generic.cancel')}
-            </button>
-          </div>
-          {!currentPosition && (
-            <div style={{ fontSize: 11, color: '#f44336', marginTop: 6 }}>
-              {t('bm.no_position')}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Category manager */}
       {showCategoryMgr && (
@@ -451,7 +305,6 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                     transition: 'background 0.15s',
                   }}
                   onClick={() => onBookmarkClick(bm)}
-                  onContextMenu={(e) => handleContextMenu(e, bm)}
                   onMouseEnter={(e) => {
                     (e.currentTarget as HTMLDivElement).style.background = '#3a3a3e';
                   }}
@@ -470,311 +323,89 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                   >
                     <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" />
                   </svg>
-                  {editingId === bm.id ? (
-                    <input
-                      type="text"
-                      className="search-input"
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && bm.id) {
-                          onBookmarkEdit(bm.id, { name: editName });
-                          setEditingId(null);
-                        }
-                        if (e.key === 'Escape') setEditingId(null);
-                      }}
-                      onBlur={() => setEditingId(null)}
-                      onClick={(e) => e.stopPropagation()}
-                      style={{ flex: 1, padding: '2px 4px', fontSize: 11 }}
-                      autoFocus
-                    />
-                  ) : (
-                    <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: 13, fontWeight: 600 }}>
-                        {bm.address ? `(${bm.address})${bm.name}` : bm.name}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 10,
-                          opacity: 0.72,
-                          lineHeight: 1.3,
-                          marginTop: 2,
-                          display: '-webkit-box',
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical',
-                          overflow: 'hidden',
-                          whiteSpace: 'normal',
-                        }}
-                      >
-                        {bm.note || ' '}
-                      </span>
-                    </div>
-                  )}
-                  {bm.id && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (confirm(t('bm.delete_confirm', { name: bm.name }))) {
-                          onBookmarkDelete(bm.id!);
-                        }
-                      }}
-                      title={t('generic.delete')}
+                  <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: 13, fontWeight: 600 }}>
+                      {bm.address ? `${bm.name} (${bm.address})` : bm.name}
+                    </span>
+                    <span
                       style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: 'rgba(255,255,255,0.55)',
-                        cursor: 'pointer',
-                        padding: '2px 4px',
-                        flexShrink: 0,
+                        fontSize: 10,
+                        opacity: 0.72,
+                        lineHeight: 1.3,
+                        marginTop: 2,
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                        whiteSpace: 'normal',
                       }}
                     >
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <polyline points="3,6 5,6 21,6" />
-                        <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                      </svg>
-                    </button>
-                  )}
+                      {bm.note || ' '}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                    {bm.id && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onBookmarkEdit(bm);
+                        }}
+                        title={t('bm.edit')}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'rgba(255,255,255,0.55)',
+                          cursor: 'pointer',
+                          padding: '2px 4px',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                          <path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                        </svg>
+                      </button>
+                    )}
+                    {bm.id && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(t('bm.delete_confirm', { name: bm.name }))) {
+                            onBookmarkDelete(bm.id!);
+                          }
+                        }}
+                        title={t('generic.delete')}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'rgba(255,255,255,0.55)',
+                          cursor: 'pointer',
+                          padding: '2px 4px',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="3,6 5,6 21,6" />
+                          <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
           )}
         </div>
       ))}
-
       {bookmarks.length === 0 && (
         <div style={{ fontSize: 12, opacity: 0.5, padding: '8px 0', textAlign: 'center' }}>
           {t('bm.empty')}
         </div>
       )}
-
-      {/* Context menu (dismissed via document click listener — see useEffect) */}
-      {contextMenu && (
-        <>
-          <div
-            data-bookmark-context-menu
-            style={{
-              position: 'fixed',
-              left: contextMenu.x,
-              top: contextMenu.y,
-              zIndex: 9999,
-              background: '#2a2a2e',
-              border: '1px solid #444',
-              borderRadius: 6,
-              padding: '4px 0',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-              minWidth: 140,
-            }}
-          >
-            <div
-              style={ctxItemStyle}
-              onMouseEnter={ctxHighlight}
-              onMouseLeave={ctxUnhighlight}
-              onClick={() => {
-                if (contextMenu.bm.id) {
-                  setEditingId(contextMenu.bm.id);
-                  setEditName(contextMenu.bm.name);
-                }
-                setContextMenu(null);
-              }}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 6 }}>
-                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                <path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
-              {t('bm.edit')}
-            </div>
-            <div
-              style={ctxItemStyle}
-              onMouseEnter={ctxHighlight}
-              onMouseLeave={ctxUnhighlight}
-              onClick={async () => {
-                const text = `${contextMenu.bm.name} ${contextMenu.bm.lat.toFixed(6)}, ${contextMenu.bm.lng.toFixed(6)}`;
-                try {
-                  await navigator.clipboard.writeText(text);
-                } catch {
-                  // Fallback for environments without clipboard API
-                  const ta = document.createElement('textarea');
-                  ta.value = text;
-                  document.body.appendChild(ta);
-                  ta.select();
-                  try { document.execCommand('copy'); } catch { /* ignore */ }
-                  document.body.removeChild(ta);
-                }
-                setContextMenu(null);
-              }}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 6 }}>
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-              </svg>
-              {t('bm.copy')}
-            </div>
-            <div
-              style={ctxItemStyle}
-              onMouseEnter={ctxHighlight}
-              onMouseLeave={ctxUnhighlight}
-              onClick={() => {
-                if (contextMenu.bm.id) onBookmarkDelete(contextMenu.bm.id);
-                setContextMenu(null);
-              }}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f44336" strokeWidth="2" style={{ marginRight: 6 }}>
-                <polyline points="3,6 5,6 21,6" />
-                <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-              </svg>
-              <span style={{ color: '#f44336' }}>{t('generic.delete')}</span>
-            </div>
-            {categories.length > 1 && (
-              <>
-                <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
-                <div style={{ padding: '4px 12px', fontSize: 10, opacity: 0.5 }}>{t('bm.move_to')}</div>
-                {categories
-                  .filter((c) => c !== contextMenu.bm.category)
-                  .map((cat) => (
-                    <div
-                      key={cat}
-                      style={ctxItemStyle}
-                      onMouseEnter={ctxHighlight}
-                      onMouseLeave={ctxUnhighlight}
-                      onClick={() => {
-                        if (contextMenu.bm.id) {
-                          onBookmarkEdit(contextMenu.bm.id, { category: cat });
-                        }
-                        setContextMenu(null);
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: '50%',
-                          background: getCategoryColor(cat),
-                          marginRight: 6,
-                        }}
-                      />
-                      {displayCat(cat)}
-                    </div>
-                  ))}
-              </>
-            )}
-          </div>
-        </>
-      )}
-
-      {showCustomDialog && createPortal(
-        <div
-          onClick={() => setShowCustomDialog(false)}
-          className="anim-fade-in"
-          style={{
-            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-            background: 'rgba(8, 10, 20, 0.55)',
-            backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
-            zIndex: 1000,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="anim-scale-in"
-            style={{
-              background: 'rgba(26, 29, 39, 0.96)',
-              backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
-              border: '1px solid rgba(108, 140, 255, 0.2)',
-              borderRadius: 12, padding: 18, width: 320, color: '#e0e0e0',
-              boxShadow: '0 20px 60px rgba(12, 18, 40, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05) inset',
-            }}
-          >
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>
-              {t('bm.add_custom')}
-            </div>
-            <input
-              type="text"
-              className="search-input"
-              placeholder={t('bm.name_placeholder')}
-              value={customName}
-              autoFocus
-              onChange={(e) => setCustomName(e.target.value)}
-              style={{ width: '100%', marginBottom: 8 }}
-            />
-            <textarea
-              className="search-input"
-              placeholder={t('bm.note_placeholder')}
-              value={customNote}
-              onChange={(e) => setCustomNote(e.target.value)}
-              style={{ width: '100%', marginBottom: 8, minHeight: 64, resize: 'vertical' }}
-            />
-            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-              <input
-                type="text"
-                className="search-input"
-                inputMode="decimal"
-                placeholder={t('bm.lat_placeholder')}
-                value={customLat}
-                onChange={(e) => setCustomLat(e.target.value)}
-                style={{ flex: 1 }}
-              />
-              <input
-                type="text"
-                className="search-input"
-                inputMode="decimal"
-                placeholder={t('bm.lng_placeholder')}
-                value={customLng}
-                onChange={(e) => setCustomLng(e.target.value)}
-                style={{ flex: 1 }}
-              />
-            </div>
-            <select
-              value={customCategory}
-              onChange={(e) => setCustomCategory(e.target.value)}
-              style={{
-                width: '100%', marginBottom: 12, padding: '6px 8px',
-                background: '#1e1e22', color: '#e0e0e0', border: '1px solid #444',
-                borderRadius: 4, fontSize: 12,
-              }}
-            >
-              {categories.map((c) => (
-                <option key={c} value={c}>{displayCat(c)}</option>
-              ))}
-            </select>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button
-                className="action-btn primary"
-                style={{ flex: 1 }}
-                disabled={
-                  !customName.trim() ||
-                  !Number.isFinite(parseFloat(customLat)) ||
-                  !Number.isFinite(parseFloat(customLng))
-                }
-                onClick={handleAddCustom}
-              >{t('generic.add')}</button>
-              <button className="action-btn" onClick={() => setShowCustomDialog(false)}>
-                {t('generic.cancel')}
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body,
-      )}
     </div>
   );
 };
-
-const ctxItemStyle: React.CSSProperties = {
-  padding: '6px 12px',
-  cursor: 'pointer',
-  fontSize: 12,
-  display: 'flex',
-  alignItems: 'center',
-  color: '#e0e0e0',
-  transition: 'background 0.15s',
-};
-
-function ctxHighlight(e: React.MouseEvent<HTMLDivElement>) {
-  (e.currentTarget as HTMLDivElement).style.background = '#3a3a3e';
-}
-function ctxUnhighlight(e: React.MouseEvent<HTMLDivElement>) {
-  (e.currentTarget as HTMLDivElement).style.background = 'transparent';
-}
 
 export default BookmarkList;
