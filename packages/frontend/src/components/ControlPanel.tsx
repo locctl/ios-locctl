@@ -647,7 +647,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   bookmarks={bookmarks}
                   categories={bookmarkCategories}
                   currentPosition={currentPosition}
-                  onBookmarkClick={(b) => { onBookmarkClick(b); setLibraryOpen(false); }}
+                  onBookmarkClick={onBookmarkClick}
                   onOpenBookmarkCreate={onOpenBookmarkCreate}
                   onBookmarkDelete={onBookmarkDelete}
                   onBookmarkEdit={onBookmarkEdit}
