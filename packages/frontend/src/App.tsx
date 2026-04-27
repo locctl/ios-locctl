@@ -39,6 +39,8 @@ const App: React.FC = () => {
   const [cooldownEnabled, setCooldownEnabled] = useState(true)
   const [randomWalkRadius, setRandomWalkRadius] = useState(500)
   const [toastMsg, setToastMsg] = useState<string | null>(null)
+  const [waypointPreviewPath, setWaypointPreviewPath] = useState<{ lat: number; lng: number }[]>([])
+  const [straightRouteMode, setStraightRouteMode] = useState(false)
   const [selectedTarget, setSelectedTarget] = useState<{ lat: number; lng: number; label?: string; source?: string } | null>(null)
   const [recenterToCurrentSignal, setRecenterToCurrentSignal] = useState(0)
   const [bookmarkDialog, setBookmarkDialog] = useState<{
@@ -80,66 +82,6 @@ const App: React.FC = () => {
       showToast(t('status.restore_failed'))
     }
   }, [showToast, t, sim])
-  const [wpGenRadius, setWpGenRadius] = useState(300)
-  const [wpGenCount, setWpGenCount] = useState(5)
-
-  const generateWaypoints = useCallback((radius: number, count: number) => {
-    if (!sim.currentPosition) {
-      alert(t('toast.no_position_random'))
-      return
-    }
-    const { lat, lng } = sim.currentPosition
-    const latScale = 111320
-    const lngScale = 111320 * Math.cos((lat * Math.PI) / 180)
-
-    type Pt = { lat: number; lng: number; theta?: number }
-    const pts: Pt[] = []
-    for (let i = 0; i < count; i++) {
-      const r = radius * Math.sqrt(Math.random())
-      const theta = Math.random() * 2 * Math.PI
-      pts.push({
-        lat: lat + (r * Math.cos(theta)) / latScale,
-        lng: lng + (r * Math.sin(theta)) / lngScale,
-        theta,
-      })
-    }
-
-    // Nearest-neighbor from current position → shorter total path
-    const remaining = [...pts]
-    const ordered: Pt[] = []
-    let cx = lat, cy = lng
-    while (remaining.length) {
-      let bestIdx = 0, bestD = Infinity
-      for (let i = 0; i < remaining.length; i++) {
-        const dx = (remaining[i].lat - cx) * latScale
-        const dy = (remaining[i].lng - cy) * lngScale
-        const d = dx * dx + dy * dy
-        if (d < bestD) { bestD = d; bestIdx = i }
-      }
-      const [next] = remaining.splice(bestIdx, 1)
-      ordered.push(next)
-      cx = next.lat; cy = next.lng
-    }
-
-    // Seed the list with the current position as index 0 so the start button
-    // doesn't need to inject it later (and can't double-inject on re-click).
-    sim.setWaypoints([
-      { lat, lng },
-      ...ordered.map(({ lat, lng }) => ({ lat, lng })),
-    ])
-  }, [sim, t])
-
-  const handleGenerateRandomWaypoints = useCallback(() => {
-    generateWaypoints(wpGenRadius, wpGenCount)
-  }, [generateWaypoints, wpGenRadius, wpGenCount])
-
-  const handleGenerateAllRandom = useCallback(() => {
-    const radius = Math.floor(50 + Math.random() * 950)  // 50–1000 m
-    const count = Math.floor(3 + Math.random() * 8)       // 3–10 點
-    setWpGenRadius(radius)
-    setWpGenCount(count)
-    generateWaypoints(radius, count)
-  }, [generateWaypoints])
 
   const handleToggleCooldown = useCallback((enabled: boolean) => {
     setCooldownEnabled(enabled)
@@ -294,22 +236,99 @@ const App: React.FC = () => {
     sim.setWaypoints((prev: any[]) => prev.filter((_: any, i: number) => i !== index))
   }, [sim])
 
+  useEffect(() => {
+    let cancelled = false
+    const route = sim.waypoints
+    const shouldPreview = (sim.mode === SimMode.Loop || sim.mode === SimMode.MultiStop) && route.length > 1
+
+    if (!shouldPreview) {
+      setWaypointPreviewPath([])
+      return
+    }
+
+    const buildStraightPreview = () => {
+      const preview = route.map((wp) => ({ lat: wp.lat, lng: wp.lng }))
+      if (sim.mode === SimMode.Loop && route.length > 1) {
+        preview.push({ lat: route[0].lat, lng: route[0].lng })
+      }
+      return preview
+    }
+
+    const run = async () => {
+      if (straightRouteMode) {
+        if (!cancelled) setWaypointPreviewPath(buildStraightPreview())
+        return
+      }
+
+      const preview: { lat: number; lng: number }[] = []
+      const legs: Array<[number, number, number, number]> = []
+
+      for (let i = 0; i < route.length - 1; i++) {
+        const a = route[i]
+        const b = route[i + 1]
+        legs.push([a.lat, a.lng, b.lat, b.lng])
+      }
+      if (sim.mode === SimMode.Loop && route.length > 1) {
+        const last = route[route.length - 1]
+        const first = route[0]
+        legs.push([last.lat, last.lng, first.lat, first.lng])
+      }
+
+      try {
+        for (const [alat, alng, blat, blng] of legs) {
+          const res = await api.planRoute({ lat: alat, lng: alng }, { lat: blat, lng: blng }, sim.moveMode)
+          const coords = Array.isArray((res as any)?.coords) ? (res as any).coords : []
+          if (!Array.isArray(coords) || coords.length === 0) continue
+          for (let i = 0; i < coords.length; i++) {
+            const pt = coords[i]
+            const lat = Array.isArray(pt) ? pt[0] : pt.lat
+            const lng = Array.isArray(pt) ? pt[1] : pt.lng
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue
+            if (preview.length > 0) {
+              const prev = preview[preview.length - 1]
+              const same = Math.abs(prev.lat - lat) < 1e-7 && Math.abs(prev.lng - lng) < 1e-7
+              if (same) continue
+            }
+            preview.push({ lat, lng })
+          }
+        }
+        if (!cancelled) {
+          setWaypointPreviewPath(preview.length > 0 ? preview : buildStraightPreview())
+        }
+      } catch {
+        if (!cancelled) setWaypointPreviewPath(buildStraightPreview())
+      }
+    }
+
+    const timer = window.setTimeout(() => {
+      void run()
+    }, 180)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [sim.mode, sim.moveMode, sim.waypoints, straightRouteMode])
+
   const handleStartWaypointRoute = useCallback(() => {
-    // UI waypoint list already includes the current position as index 0
-    // (see handleAddWaypoint / generateWaypoints), so just hand it straight
-    // to the backend. No more prepend-on-start, no more accidental re-inject
-    // on repeated clicks.
     const route = sim.waypoints
     if (route.length < 2) {
       showToast(t('toast.no_waypoints'))
       return
     }
+    const start = sim.currentPosition
+    const routeWithStart = (() => {
+      if (!start) return route
+      const first = route[0]
+      const sameStart = first && Math.abs(first.lat - start.lat) < 1e-7 && Math.abs(first.lng - start.lng) < 1e-7
+      return sameStart ? route : [{ lat: start.lat, lng: start.lng }, ...route]
+    })()
     if (sim.mode === SimMode.Loop) {
-      sim.startLoop(route)
+      sim.startLoop(routeWithStart, straightRouteMode)
     } else if (sim.mode === SimMode.MultiStop) {
-      sim.multiStop(route, 0, false)
+      sim.multiStop(routeWithStart, 0, false, straightRouteMode)
     }
-  }, [sim, showToast, t])
+  }, [sim, showToast, t, straightRouteMode])
 
   // -- ControlPanel handlers --
   const handleStart = useCallback(() => {
@@ -551,51 +570,20 @@ const App: React.FC = () => {
               {t('panel.waypoints')} ({sim.waypoints.length})
               <span style={{ fontSize: 10, opacity: 0.5, marginLeft: 4 }}>{t('panel.waypoints_hint')}</span>
             </div>
-            <div className="section-content">
-              <PauseControl
-                labelKey={sim.mode === SimMode.Loop ? 'pause.loop' : 'pause.multi_stop'}
-                value={sim.mode === SimMode.Loop ? sim.pauseLoop : sim.pauseMultiStop}
-                onChange={sim.mode === SimMode.Loop ? sim.setPauseLoop : sim.setPauseMultiStop}
-              />
-              <div style={{ marginBottom: 6, fontSize: 11 }}>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
-                  <span style={{ opacity: 0.7, width: 36 }}>{t('panel.waypoints_radius')}</span>
+              <div className="section-content">
+                <PauseControl
+                  labelKey={sim.mode === SimMode.Loop ? 'pause.loop' : 'pause.multi_stop'}
+                  value={sim.mode === SimMode.Loop ? sim.pauseLoop : sim.pauseMultiStop}
+                  onChange={sim.mode === SimMode.Loop ? sim.setPauseLoop : sim.setPauseMultiStop}
+                />
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0 8px', fontSize: 11 }}>
                   <input
-                    type="number"
-                    min={10}
-                    value={wpGenRadius}
-                    onChange={(e) => setWpGenRadius(Math.max(1, parseInt(e.target.value) || 0))}
-                    style={{ flex: 1, padding: '2px 4px', fontSize: 11 }}
+                    type="checkbox"
+                    checked={straightRouteMode}
+                    onChange={(e) => setStraightRouteMode(e.target.checked)}
                   />
-                  <span style={{ opacity: 0.5, width: 16 }}>m</span>
-                </div>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
-                  <span style={{ opacity: 0.7, width: 36 }}>{t('panel.waypoints_count')}</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={50}
-                    value={wpGenCount}
-                    onChange={(e) => setWpGenCount(Math.max(1, parseInt(e.target.value) || 0))}
-                    style={{ flex: 1, padding: '2px 4px', fontSize: 11 }}
-                  />
-                  <span style={{ opacity: 0.5, width: 16 }}>{t('panel.points')}</span>
-                </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button
-                    className="action-btn"
-                    style={{ flex: 1, padding: '3px 8px', fontSize: 11 }}
-                    onClick={handleGenerateRandomWaypoints}
-                    title={t('panel.waypoints_gen_tooltip')}
-                  >{t('panel.waypoints_generate')}</button>
-                  <button
-                    className="action-btn"
-                    style={{ flex: 1, padding: '3px 8px', fontSize: 11 }}
-                    onClick={handleGenerateAllRandom}
-                    title={t('panel.waypoints_gen_all_tooltip')}
-                  >{t('panel.waypoints_generate_all')}</button>
-                </div>
-              </div>
+                  <span>直線導航</span>
+                </label>
               {sim.waypoints.length === 0 && (
                 <div style={{ fontSize: 12, opacity: 0.5, padding: '4px 0' }}>
                   {t('panel.waypoints_empty')}
@@ -730,18 +718,13 @@ const App: React.FC = () => {
           </div>
         )}
         <MapView
-          activeMode={sim.mode}
           currentPosition={currentPos}
           destination={selectedTarget ?? destPos}
           selectedTarget={selectedTarget}
           recenterToCurrentSignal={recenterToCurrentSignal}
           waypoints={sim.waypoints.map((w, i) => ({ ...w, index: i }))}
-          routePath={sim.routePath}
-          randomWalkRadius={
-            sim.mode === SimMode.RandomWalk ? randomWalkRadius :
-            (sim.mode === SimMode.Loop || sim.mode === SimMode.MultiStop) ? wpGenRadius :
-            null
-          }
+          routePath={straightRouteMode ? waypointPreviewPath : (sim.routePath.length > 0 ? sim.routePath : waypointPreviewPath)}
+          randomWalkRadius={sim.mode === SimMode.RandomWalk ? randomWalkRadius : null}
           onMapClick={handleMapClick}
           onTeleport={handleTeleport}
           onNavigate={handleNavigate}

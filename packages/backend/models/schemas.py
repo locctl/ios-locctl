@@ -62,6 +62,7 @@ class NavigateRequest(BaseModel):
 class LoopRequest(BaseModel):
     waypoints: list[Coordinate]
     mode: MovementMode = MovementMode.WALKING
+    direct_route: bool = False
     speed_kmh: float | None = None
     speed_min_kmh: float | None = None
     speed_max_kmh: float | None = None
@@ -75,6 +76,7 @@ class MultiStopRequest(BaseModel):
     mode: MovementMode = MovementMode.WALKING
     stop_duration: int = 0
     loop: bool = False
+    direct_route: bool = False
     speed_kmh: float | None = None
     speed_min_kmh: float | None = None
     speed_max_kmh: float | None = None

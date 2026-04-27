@@ -194,6 +194,7 @@ class SimulationEngine:
         self,
         waypoints: list[Coordinate],
         mode: MovementMode,
+        direct_route: bool = False,
         speed_kmh: float | None = None,
         speed_min_kmh: float | None = None,
         speed_max_kmh: float | None = None,
@@ -207,7 +208,7 @@ class SimulationEngine:
         self._pause_event.set()
         await self._run_handler(
             self._looper.start_loop(
-                waypoints, mode, speed_kmh=speed_kmh,
+                waypoints, mode, direct_route=direct_route, speed_kmh=speed_kmh,
                 speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
                 pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
             ),
@@ -235,6 +236,7 @@ class SimulationEngine:
         mode: MovementMode,
         stop_duration: float = 0,
         loop: bool = False,
+        direct_route: bool = False,
         speed_kmh: float | None = None,
         speed_min_kmh: float | None = None,
         speed_max_kmh: float | None = None,
@@ -248,7 +250,7 @@ class SimulationEngine:
         self._pause_event.set()
         await self._run_handler(
             self._multi_stop.start(
-                waypoints, mode, stop_duration, loop, speed_kmh=speed_kmh,
+                waypoints, mode, stop_duration, loop, direct_route=direct_route, speed_kmh=speed_kmh,
                 speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
                 pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
             ),

@@ -75,12 +75,8 @@ export const STRINGS = {
   'panel.bookmarks': { zh: '書籤', en: 'Bookmarks' },
   'panel.routes': { zh: '路線', en: 'Routes' },
   'panel.waypoints': { zh: '路徑點', en: 'Waypoints' },
-  'panel.waypoints_hint': { zh: '右鍵地圖添加', en: 'Right-click map to add' },
-  'panel.waypoints_radius': { zh: '半徑', en: 'Radius' },
-  'panel.waypoints_count': { zh: '數量', en: 'Count' },
-  'panel.waypoints_generate': { zh: '隨機產生', en: 'Random' },
-  'panel.waypoints_generate_all': { zh: '全隨機', en: 'All random' },
-  'panel.waypoints_empty': { zh: '在地圖上右鍵點擊 → 「添加路徑點」,或使用上方隨機產生', en: 'Right-click the map to add waypoints, or use random generate above' },
+  'panel.waypoints_hint': { zh: '右鍵地圖添加停靠點', en: 'Right-click map to add stops' },
+  'panel.waypoints_empty': { zh: '在地圖上右鍵點擊 → 「添加路徑點」', en: 'Right-click the map to add waypoints' },
   'panel.waypoints_start_loop': { zh: '開始巡迴', en: 'Start Loop' },
   'panel.waypoints_start_multi': { zh: '開始多點導航', en: 'Start Multi-stop' },
   'panel.waypoints_start_navigate': { zh: '開始導航', en: 'Start Navigate' },
@@ -217,15 +213,13 @@ export const STRINGS = {
   'panel.waypoint_num': { zh: '路徑點 {n}', en: 'Waypoint {n}' },
   'panel.waypoint_start': { zh: '起點', en: 'Start' },
   'panel.waypoints_running_hint': { zh: '進行中無法重新開始,請先按下方停止', en: 'In progress, press Stop below to restart' },
-  'panel.waypoints_gen_tooltip': { zh: '在當前位置周圍隨機產生路徑點', en: 'Random waypoints around current position' },
-  'panel.waypoints_gen_all_tooltip': { zh: '半徑與數量全隨機', en: 'Fully randomize radius and count' },
   'panel.points': { zh: '點', en: 'pts' },
   'panel.start_prefix': { zh: '開始', en: 'Start ' },
   'panel.pts_short': { zh: 'pts', en: 'pts' },
 
   // ── Toasts extra ─────────────────────────────
   'toast.no_position_random': { zh: '尚未取得目前位置,無法產生隨機路徑點', en: 'No current position, cannot generate random waypoints' },
-  'toast.no_waypoints': { zh: '尚未設定路徑點,請在地圖上右鍵添加或使用隨機產生', en: 'No waypoints set, right-click the map to add, or use Random generate' },
+  'toast.no_waypoints': { zh: '尚未設定路徑點,請在地圖上右鍵添加', en: 'No waypoints set, right-click the map to add' },
   'toast.pause_countdown': { zh: '到點暫停中 · 剩餘 {n}s', en: 'Paused at waypoint · {n}s left' },
 
   // ── Bookmarks ────────────────────────────────

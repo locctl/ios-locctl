@@ -207,6 +207,7 @@ async def loop(req: LoopRequest):
     engine = await _engine()
     asyncio.create_task(engine.start_loop(
         req.waypoints, req.mode,
+        direct_route=req.direct_route,
         speed_kmh=req.speed_kmh,
         speed_min_kmh=req.speed_min_kmh, speed_max_kmh=req.speed_max_kmh,
         pause_enabled=req.pause_enabled, pause_min=req.pause_min, pause_max=req.pause_max,
@@ -220,6 +221,7 @@ async def multi_stop(req: MultiStopRequest):
     engine = await _engine()
     asyncio.create_task(engine.multi_stop(
         req.waypoints, req.mode, req.stop_duration, req.loop,
+        direct_route=req.direct_route,
         speed_kmh=req.speed_kmh,
         speed_min_kmh=req.speed_min_kmh, speed_max_kmh=req.speed_max_kmh,
         pause_enabled=req.pause_enabled, pause_min=req.pause_min, pause_max=req.pause_max,

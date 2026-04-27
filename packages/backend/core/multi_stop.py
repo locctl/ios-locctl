@@ -25,6 +25,7 @@ class MultiStopNavigator:
         stop_duration: float = 0,
         loop: bool = False,
         *,
+        direct_route: bool = False,
         speed_kmh: float | None = None,
         speed_min_kmh: float | None = None,
         speed_max_kmh: float | None = None,
@@ -74,15 +75,27 @@ class MultiStopNavigator:
         engine.lap_count = 0
         engine.distance_traveled = 0.0
 
-        # Pre-calculate full route path for display
+        # Pre-calculate full route path for display.
         all_wp_tuples = [(wp.lat, wp.lng) for wp in waypoints]
+        route_distance = 0.0
         try:
-            full_route = await engine.route_service.get_multi_route(
-                all_wp_tuples, profile=osrm_profile,
-            )
-            await engine._emit("route_path", {
-                "coords": [{"lat": pt[0], "lng": pt[1]} for pt in full_route["coords"]],
-            })
+            if direct_route:
+                full_route_coords = list(waypoints)
+                route_distance = sum(
+                    self._quick_distance(full_route_coords[i], full_route_coords[i + 1])
+                    for i in range(len(full_route_coords) - 1)
+                )
+                await engine._emit("route_path", {
+                    "coords": [{"lat": wp.lat, "lng": wp.lng} for wp in full_route_coords],
+                })
+            else:
+                full_route = await engine.route_service.get_multi_route(
+                    all_wp_tuples, profile=osrm_profile,
+                )
+                route_distance = full_route["distance"]
+                await engine._emit("route_path", {
+                    "coords": [{"lat": pt[0], "lng": pt[1]} for pt in full_route["coords"]],
+                })
         except Exception:
             logger.warning("Failed to pre-calculate full multi-stop route for display")
 
@@ -104,12 +117,15 @@ class MultiStopNavigator:
         start_pos = engine.current_position
         start_dist = self._quick_distance(start_pos, first)
         if start_dist > 50:  # more than 50m away, route to the first waypoint
-            route_data = await engine.route_service.get_route(
-                start_pos.lat, start_pos.lng,
-                first.lat, first.lng,
-                profile=osrm_profile,
-            )
-            coords = [Coordinate(lat=pt[0], lng=pt[1]) for pt in route_data["coords"]]
+            if direct_route:
+                coords = [start_pos, first]
+            else:
+                route_data = await engine.route_service.get_route(
+                    start_pos.lat, start_pos.lng,
+                    first.lat, first.lng,
+                    profile=osrm_profile,
+                )
+                coords = [Coordinate(lat=pt[0], lng=pt[1]) for pt in route_data["coords"]]
             if len(coords) >= 2:
                 await engine._move_along_route(coords, _pick_profile())
                 if engine._stop_event.is_set():
@@ -141,14 +157,18 @@ class MultiStopNavigator:
                 )
 
                 # Get route for this leg
-                route_data = await engine.route_service.get_route(
-                    wp_a.lat, wp_a.lng,
-                    wp_b.lat, wp_b.lng,
-                    profile=osrm_profile,
-                )
+                if direct_route:
+                    coords = [wp_a, wp_b]
+                    engine.distance_remaining = self._quick_distance(wp_a, wp_b)
+                else:
+                    route_data = await engine.route_service.get_route(
+                        wp_a.lat, wp_a.lng,
+                        wp_b.lat, wp_b.lng,
+                        profile=osrm_profile,
+                    )
 
-                coords = [Coordinate(lat=pt[0], lng=pt[1]) for pt in route_data["coords"]]
-                engine.distance_remaining = route_data["distance"]
+                    coords = [Coordinate(lat=pt[0], lng=pt[1]) for pt in route_data["coords"]]
+                    engine.distance_remaining = route_data["distance"]
 
                 if len(coords) >= 2:
                     await engine._move_along_route(coords, _pick_profile())

@@ -277,7 +277,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
   )
 
   const startLoop = useCallback(
-    async (wps: LatLng[]) => {
+    async (wps: LatLng[], directRoute = false) => {
       setError(null)
       try {
         setMode(SimMode.Loop)
@@ -286,7 +286,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
         // waypoints here would prepend the start point on every restart,
         // and break the backend↔UI seg_idx mapping for highlighting.
         setProgress(0)
-        const res = await api.startLoop(wps, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseLoop.enabled, pause_min: pauseLoop.min, pause_max: pauseLoop.max })
+        const res = await api.startLoop(wps, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseLoop.enabled, pause_min: pauseLoop.min, pause_max: pauseLoop.max }, directRoute)
         setStatus((prev) => ({ ...prev, running: true, paused: false }))
         setEffectiveSpeed({ kmh: customSpeedKmh, min: speedMinKmh, max: speedMaxKmh })
         return res
@@ -299,13 +299,13 @@ export function useSimulation(wsMessage: WsMessage | null) {
   )
 
   const multiStop = useCallback(
-    async (wps: LatLng[], stopDuration: number, loop: boolean) => {
+    async (wps: LatLng[], stopDuration: number, loop: boolean, directRoute = false) => {
       setError(null)
       try {
         setMode(SimMode.MultiStop)
         // See startLoop — do not overwrite UI waypoints with the backend route.
         setProgress(0)
-        const res = await api.multiStop(wps, moveMode, stopDuration, loop, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseMultiStop.enabled, pause_min: pauseMultiStop.min, pause_max: pauseMultiStop.max })
+        const res = await api.multiStop(wps, moveMode, stopDuration, loop, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseMultiStop.enabled, pause_min: pauseMultiStop.min, pause_max: pauseMultiStop.max }, directRoute)
         setStatus((prev) => ({ ...prev, running: true, paused: false }))
         setEffectiveSpeed({ kmh: customSpeedKmh, min: speedMinKmh, max: speedMaxKmh })
         return res

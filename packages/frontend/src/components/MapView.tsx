@@ -23,7 +23,6 @@ interface ContextMenuState {
 }
 
 interface MapViewProps {
-  activeMode: SimMode;
   currentPosition: Position | null;
   destination: Position | null;
   selectedTarget?: Position | null;
@@ -45,7 +44,6 @@ interface MapViewProps {
 }
 
 const MapView: React.FC<MapViewProps> = ({
-  activeMode,
   currentPosition,
   destination,
   selectedTarget,
@@ -392,9 +390,11 @@ const MapView: React.FC<MapViewProps> = ({
       const latlngs: L.LatLngExpression[] = routePath.map((p) => [p.lat, p.lng]);
       const polyline = L.polyline(latlngs, {
         color: '#4285f4',
-        weight: 4,
-        opacity: 0.8,
+        weight: 5,
+        opacity: 0.9,
         dashArray: '8, 8',
+        lineCap: 'round',
+        lineJoin: 'round',
       }).addTo(map);
       polylineRef.current = polyline;
     }
@@ -566,13 +566,13 @@ const MapView: React.FC<MapViewProps> = ({
         </button>
         <button
           onClick={submitCoordGo}
-          disabled={!coordInput.trim() || !deviceConnected}
+          disabled={!coordInput.trim()}
           title={t('generic.preview')}
           style={{
-            background: !coordInput.trim() || !deviceConnected ? 'rgba(108,140,255,0.3)' : '#6c8cff',
+            background: !coordInput.trim() ? 'rgba(108,140,255,0.3)' : '#6c8cff',
             color: '#fff', border: 'none', borderRadius: 4,
             padding: '4px 10px', fontSize: 11, fontWeight: 600,
-            cursor: !coordInput.trim() || !deviceConnected ? 'not-allowed' : 'pointer',
+            cursor: !coordInput.trim() ? 'not-allowed' : 'pointer',
           }}
         >{tRef.current('generic.preview')}</button>
         {selectedTarget && (

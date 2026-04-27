@@ -7,6 +7,7 @@ import logging
 import random
 
 from models.schemas import Coordinate, MovementMode, SimulationState
+from services.interpolator import RouteInterpolator
 from config import resolve_speed_profile
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ class RouteLooper:
         waypoints: list[Coordinate],
         mode: MovementMode,
         *,
+        direct_route: bool = False,
         speed_kmh: float | None = None,
         speed_min_kmh: float | None = None,
         speed_max_kmh: float | None = None,
@@ -52,13 +54,20 @@ class RouteLooper:
         # Close the loop: append the first waypoint at the end
         closed_waypoints = list(waypoints) + [waypoints[0]]
 
-        # Build OSRM route through all waypoints
+        # Build either an OSRM route or a straight-line route through all waypoints.
         wp_tuples = [(wp.lat, wp.lng) for wp in closed_waypoints]
-        route_data = await engine.route_service.get_multi_route(
-            wp_tuples, profile=osrm_profile,
-        )
-
-        coords = [Coordinate(lat=pt[0], lng=pt[1]) for pt in route_data["coords"]]
+        if direct_route:
+            coords = list(closed_waypoints)
+            route_distance = sum(
+                RouteInterpolator.haversine(coords[i].lat, coords[i].lng, coords[i + 1].lat, coords[i + 1].lng)
+                for i in range(len(coords) - 1)
+            )
+        else:
+            route_data = await engine.route_service.get_multi_route(
+                wp_tuples, profile=osrm_profile,
+            )
+            coords = [Coordinate(lat=pt[0], lng=pt[1]) for pt in route_data["coords"]]
+            route_distance = route_data["distance"]
 
         if len(coords) < 2:
             raise ValueError("OSRM returned an empty route for the loop")
@@ -81,7 +90,7 @@ class RouteLooper:
         # Loop until stopped
         while not engine._stop_event.is_set():
             engine.distance_traveled = 0.0
-            engine.distance_remaining = route_data["distance"]
+            engine.distance_remaining = route_distance
             engine.segment_index = 0
 
             # Tell _move_along_route which user-facing waypoints to track for
