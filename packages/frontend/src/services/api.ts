@@ -159,11 +159,14 @@ export interface ImportResult {
 export const importBookmarksCsv = (csv: string) =>
   request<ImportResult>('POST', '/api/bookmarks/import', { csv })
 
-// ── Bookmarks Sheets sync (Phase B1) ──────────────────────────────
+// ── Bookmarks Sheets sync (Phase B1 + B2) ────────────────────────
 export interface SyncStatus {
   configured: boolean
   sheet_id: string
   tab_name: string
+  webhook_url: string
+  webhook_configured: boolean
+  pending_local_count: number
   last_synced_at: string
   total_count: number
   per_category: Record<string, number>
@@ -172,12 +175,30 @@ export interface SyncStatus {
   removed: number
 }
 export const getSyncStatus = () => request<SyncStatus>('GET', '/api/bookmarks/sync/status')
-export const setSyncConfig = (sheet_url_or_id: string, tab_name?: string) =>
-  request<{ status: string; sheet_id: string; tab_name: string }>(
-    'PUT', '/api/bookmarks/sync/config', { sheet_url_or_id, tab_name },
+
+interface SyncConfigPatch {
+  sheet_url_or_id?: string | null
+  tab_name?: string | null
+  webhook_url?: string | null
+}
+export const setSyncConfig = (patch: SyncConfigPatch) =>
+  request<{ status: string; sheet_id: string; tab_name: string; webhook_url: string }>(
+    'PUT', '/api/bookmarks/sync/config', patch,
   )
+
 export const syncBookmarks = () =>
   request<SyncStatus & { status: string; skipped_rows: string[] }>('POST', '/api/bookmarks/sync')
+
+export interface UploadResult {
+  status: 'ok' | 'noop'
+  uploaded: number
+  skipped: number
+  flipped_to_cloud: number
+  skipped_items?: Array<{ name: string; reason: string }>
+  message?: string
+}
+export const uploadLocalBookmarks = () =>
+  request<UploadResult>('POST', '/api/bookmarks/upload')
 
 export const openLog = () => request<{ status: string; path: string }>('POST', '/api/system/open-log')
 export const openLogFolder = () => request<{ status: string; path: string }>('POST', '/api/system/open-log-folder')

@@ -17,6 +17,8 @@ import StatusBar from './components/StatusBar'
 import BookmarkDialog, { type BookmarkDialogValue } from './components/BookmarkDialog'
 import SetupWizard, { isSetupCompleted, resetSetup } from './components/SetupWizard'
 import UsageModal from './components/UsageModal'
+import NicknameModal from './components/NicknameModal'
+import { useNickname } from './hooks/useNickname'
 
 import { SimMode, MoveMode } from './hooks/useSimulation'
 
@@ -54,6 +56,11 @@ const App: React.FC = () => {
   } | null>(null)
   const [showSetup, setShowSetup] = useState(() => !isSetupCompleted())
   const [showUsage, setShowUsage] = useState(false)
+  const nickname = useNickname()
+  const [showNicknameEdit, setShowNicknameEdit] = useState(false)
+  // First-launch prompt: required and unsdismissable until set. Only fires
+  // once the setup wizard is out of the way so we don't stack two modals.
+  const showNicknameRequired = !showSetup && !nickname.isSet
 
   const showToast = useCallback((msg: string, ms = 2000) => {
     setToastMsg(msg)
@@ -201,6 +208,9 @@ const App: React.FC = () => {
           country: value.country.trim(),
           note: value.note.trim(),
           category_id: cat?.id || 'default',
+          // Stamp the editor — added_by tracks "who last touched this" so
+          // the cloud row reflects the most recent contributor.
+          added_by: nickname.name,
         })
       } else {
         await bm.createBookmark({
@@ -210,13 +220,14 @@ const App: React.FC = () => {
           country: value.country.trim(),
           note: value.note.trim(),
           category_id: cat?.id || 'default',
+          added_by: nickname.name,
         })
       }
       setBookmarkDialog(null)
     } catch (err) {
       console.error('Failed to save bookmark:', err)
     }
-  }, [bookmarkDialog, bm])
+  }, [bookmarkDialog, bm, nickname.name])
 
   const handleAddWaypoint = useCallback((lat: number, lng: number) => {
     // Seed the list with the current device position as the implicit start
@@ -578,6 +589,7 @@ const App: React.FC = () => {
           bookmarkSyncing={bm.syncing}
           onBookmarkSync={bm.syncFromSheets}
           onBookmarkSetSyncConfig={bm.setSheetConfig}
+          onBookmarkUploadLocal={bm.uploadLocal}
           savedRoutes={savedRoutes.map(r => ({ id: r.id, name: r.name, waypoints: r.waypoints ?? [] }))}
           onRouteGpxImport={handleGpxImport}
           onRouteGpxExport={handleGpxExport}
@@ -882,6 +894,8 @@ const App: React.FC = () => {
           onOpenLog={handleOpenLog}
           onOpenUsage={handleOpenUsage}
           onResetSetup={handleResetSetup}
+          nickname={nickname.name}
+          onEditNickname={() => setShowNicknameEdit(true)}
         />
 
         {toastMsg && (
@@ -915,6 +929,13 @@ const App: React.FC = () => {
       </div>
       {showSetup && <SetupWizard onComplete={() => setShowSetup(false)} onOpenUsage={() => setShowUsage(true)} />}
       <UsageModal open={showUsage} onClose={() => setShowUsage(false)} />
+      <NicknameModal
+        open={showNicknameRequired || showNicknameEdit}
+        initial={nickname.name}
+        required={showNicknameRequired}
+        onSave={(n) => { nickname.set(n); setShowNicknameEdit(false) }}
+        onCancel={() => setShowNicknameEdit(false)}
+      />
     </div>
   )
 }

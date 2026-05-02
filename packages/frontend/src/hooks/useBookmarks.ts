@@ -79,35 +79,48 @@ export function useBookmarks() {
     }
   }, [refresh, refreshSyncStatus])
 
-  const setSheetConfig = useCallback(async (urlOrId: string, tabName?: string) => {
-    await api.setSyncConfig(urlOrId, tabName)
-    await refreshSyncStatus()
-  }, [refreshSyncStatus])
+  const setSheetConfig = useCallback(
+    async (patch: { sheet_url_or_id?: string; tab_name?: string; webhook_url?: string }) => {
+      await api.setSyncConfig(patch)
+      await refreshSyncStatus()
+    },
+    [refreshSyncStatus],
+  )
 
+  const uploadLocal = useCallback(async () => {
+    const result = await api.uploadLocalBookmarks()
+    await Promise.all([refresh(), refreshSyncStatus()])
+    return result
+  }, [refresh, refreshSyncStatus])
+
+  // Mutating operations also refresh syncStatus because the upload button's
+  // visibility depends on pending_local_count — if we don't refresh here, the
+  // sync bar lags behind reality after every add/edit/delete.
   const createBookmark = useCallback(
     async (bm: Omit<Bookmark, 'id'>) => {
       const created = await api.createBookmark(bm)
-      await refresh()
+      await Promise.all([refresh(), refreshSyncStatus()])
       return created
     },
-    [refresh],
+    [refresh, refreshSyncStatus],
   )
 
   const deleteBookmark = useCallback(
     async (id: string) => {
       await api.deleteBookmark(id)
       setBookmarks((prev) => prev.filter((b) => b.id !== id))
+      await refreshSyncStatus()
     },
-    [],
+    [refreshSyncStatus],
   )
 
   const updateBookmark = useCallback(
     async (id: string, data: Partial<Bookmark>) => {
       const updated = await api.updateBookmark(id, data)
-      await refresh()
+      await Promise.all([refresh(), refreshSyncStatus()])
       return updated
     },
-    [refresh],
+    [refresh, refreshSyncStatus],
   )
 
   const moveBookmarks = useCallback(
@@ -162,5 +175,7 @@ export function useBookmarks() {
     syncFromSheets,
     setSheetConfig,
     refreshSyncStatus,
+    // Phase B2
+    uploadLocal,
   }
 }

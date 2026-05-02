@@ -40,6 +40,11 @@ BOOKMARKS_LOCAL_BACKUP_FILE = DATA_DIR / "bookmarks.local_backup.json"
 # User's own sheet_id (set via the in-app config modal) overrides this.
 DEFAULT_SHEET_ID = "1GDTyBgBzkBiOAEc8GdlaS7pKmPWq2cMdYNLjqNwjdiU"
 DEFAULT_SHEET_TAB = "bookmarks"
+# Apps Script Web App deployment for the same Sheet — pre-wired so users
+# can hit "📤 上傳" without first having to deploy their own webhook. They
+# can override with their own deployment if they want to write to a
+# different sheet.
+DEFAULT_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzyI75bYntF5a0sgWE0UxMZSrbBMhtgTzOaFlnshrZZJpKMGLzEGSs_16q-9d4RMd3f6g/exec"
 
 # OSRM
 OSRM_BASE_URL = "https://router.project-osrm.org"

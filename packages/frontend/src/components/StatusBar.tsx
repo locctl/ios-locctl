@@ -25,6 +25,8 @@ interface StatusBarProps {
   onOpenLog?: () => void;
   onOpenUsage?: () => void;
   onResetSetup?: () => void;
+  nickname?: string;
+  onEditNickname?: () => void;
 }
 
 import type { StringKey } from '../i18n';
@@ -57,6 +59,8 @@ const StatusBar: React.FC<StatusBarProps> = ({
   onOpenLog,
   onOpenUsage,
   onResetSetup,
+  nickname,
+  onEditNickname,
 }) => {
   const t = useT();
   const [cooldownDisplay, setCooldownDisplay] = useState(cooldown);
@@ -283,6 +287,26 @@ const StatusBar: React.FC<StatusBarProps> = ({
         <span style={{ opacity: 0.4, fontSize: 10 }}>
           {new Date().toLocaleTimeString(undefined, { hour12: false })}
         </span>
+        {onEditNickname && (
+          <>
+            <div style={{ width: 1, height: 12, background: '#333' }} />
+            <button
+              onClick={onEditNickname}
+              title="設定 / 修改你的暱稱(用於 added_by)"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: nickname ? 'rgba(125, 216, 125, 0.85)' : 'rgba(255, 193, 7, 0.85)',
+                fontSize: 10,
+                cursor: 'pointer',
+                padding: '0 4px',
+                fontFamily: 'monospace',
+              }}
+            >
+              {nickname ? `@${nickname}` : '⚠ 未設暱稱'}
+            </button>
+          </>
+        )}
         <div style={{ width: 1, height: 12, background: '#333' }} />
         <span style={{ fontSize: 10, opacity: 0.45, fontFamily: 'monospace' }}>
           v{APP_VERSION}

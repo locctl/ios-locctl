@@ -11,11 +11,17 @@ from config import (
     BOOKMARKS_FILE,
     DEFAULT_SHEET_ID,
     DEFAULT_SHEET_TAB,
+    DEFAULT_WEBHOOK_URL,
     SHEETS_CONFIG_FILE,
     SHEETS_SYNC_META_FILE,
 )
 from models.schemas import Bookmark, BookmarkCategory, BookmarkMoveRequest
-from services.sheets_sync import SheetsSyncError, SheetsSyncService, parse_sheet_id_from_url
+from services.sheets_sync import (
+    SheetsSyncError,
+    SheetsSyncService,
+    merge_unique_local_into_upload_payload,
+    parse_sheet_id_from_url,
+)
 
 router = APIRouter(prefix="/api/bookmarks", tags=["bookmarks"])
 logger = logging.getLogger(__name__)
@@ -29,18 +35,27 @@ def _bm():
 # ── Sheets sync config / status helpers ──────────────────
 
 def _load_sheets_config() -> dict:
-    """Return the active Sheets config, falling back to the bundled default
-    so a fresh install is already wired up to the community sheet."""
+    """Return the active Sheets config, falling back to the bundled defaults
+    (sheet_id + webhook_url) so a fresh install is already wired up to both
+    pull from and push to the community sheet."""
+    base = {
+        "sheet_id": DEFAULT_SHEET_ID,
+        "tab_name": DEFAULT_SHEET_TAB,
+        "webhook_url": DEFAULT_WEBHOOK_URL,
+    }
     if SHEETS_CONFIG_FILE.exists():
         try:
             cfg = json.loads(SHEETS_CONFIG_FILE.read_text(encoding="utf-8"))
-            if isinstance(cfg, dict) and cfg.get("sheet_id"):
-                # Tolerate older configs that lack tab_name.
-                cfg.setdefault("tab_name", DEFAULT_SHEET_TAB)
-                return cfg
+            if isinstance(cfg, dict):
+                # Layer user overrides on top of the defaults so partial
+                # configs (e.g. user only customised webhook_url) still get
+                # the bundled sheet_id.
+                merged = {**base, **{k: v for k, v in cfg.items() if v not in (None, "")}}
+                merged.setdefault("tab_name", DEFAULT_SHEET_TAB)
+                return merged
         except (OSError, json.JSONDecodeError):
             logger.warning("sheets_config.json corrupt; falling back to defaults", exc_info=True)
-    return {"sheet_id": DEFAULT_SHEET_ID, "tab_name": DEFAULT_SHEET_TAB}
+    return base
 
 
 def _save_sheets_config(cfg: dict) -> None:
@@ -95,6 +110,7 @@ async def update_bookmark(bookmark_id: str, bookmark: Bookmark):
     bm = _bm()
     # User edits invalidate the "cloud" source flag — once a record diverges
     # from the upstream Sheet, treat it as local-pending until next upload.
+    # added_by tracks last editor (frontend stamps current nickname).
     updated = bm.update_bookmark(
         bookmark_id,
         name=bookmark.name,
@@ -103,6 +119,7 @@ async def update_bookmark(bookmark_id: str, bookmark: Bookmark):
         country=bookmark.country,
         note=bookmark.note,
         category_id=bookmark.category_id,
+        added_by=bookmark.added_by,
         source="local",
     )
     if not updated:
@@ -263,8 +280,9 @@ async def import_bookmarks_csv(data: dict):
 # ── Phase B1: Google Sheets one-way sync ──────────────────
 
 class SheetsConfigRequest(BaseModel):
-    sheet_url_or_id: str
+    sheet_url_or_id: str | None = None
     tab_name: str | None = None
+    webhook_url: str | None = None
 
 
 @router.get("/sync/config")
@@ -275,26 +293,50 @@ async def get_sync_config():
     return {
         "sheet_id": cfg.get("sheet_id", ""),
         "tab_name": cfg.get("tab_name", "bookmarks"),
+        "webhook_url": cfg.get("webhook_url", ""),
         "configured": bool(cfg.get("sheet_id")),
     }
 
 
 @router.put("/sync/config")
 async def set_sync_config(req: SheetsConfigRequest):
-    """Accept either a full Sheets URL or just the id; we extract the id
-    server-side so the user can paste the URL straight from the browser bar."""
-    sheet_id = parse_sheet_id_from_url(req.sheet_url_or_id)
-    if not sheet_id:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "invalid_sheet_url",
-                    "message": "無法從輸入解析 Sheet ID。請貼整個 Google Sheets URL,或直接貼 ID。"},
-        )
+    """Update Sheets config. Each field is independent — pass only the ones
+    you want to change. Sheet URL is parsed server-side so users can paste
+    the full Google Sheets URL straight from the browser bar."""
     cfg = _load_sheets_config()
-    cfg["sheet_id"] = sheet_id
-    cfg["tab_name"] = (req.tab_name or "bookmarks").strip() or "bookmarks"
+
+    if req.sheet_url_or_id is not None:
+        s = req.sheet_url_or_id.strip()
+        if s:
+            sheet_id = parse_sheet_id_from_url(s)
+            if not sheet_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail={"code": "invalid_sheet_url",
+                            "message": "無法從輸入解析 Sheet ID。請貼整個 Google Sheets URL,或直接貼 ID。"},
+                )
+            cfg["sheet_id"] = sheet_id
+
+    if req.tab_name is not None:
+        cfg["tab_name"] = (req.tab_name.strip() or "bookmarks")
+
+    if req.webhook_url is not None:
+        wh = req.webhook_url.strip()
+        if wh and not wh.startswith("https://script.google.com/"):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "invalid_webhook_url",
+                        "message": "Webhook URL 應為 https://script.google.com/macros/s/.../exec 格式"},
+            )
+        cfg["webhook_url"] = wh
+
     _save_sheets_config(cfg)
-    return {"status": "saved", "sheet_id": sheet_id, "tab_name": cfg["tab_name"]}
+    return {
+        "status": "saved",
+        "sheet_id": cfg.get("sheet_id", ""),
+        "tab_name": cfg.get("tab_name", "bookmarks"),
+        "webhook_url": cfg.get("webhook_url", ""),
+    }
 
 
 @router.get("/sync/status")
@@ -302,10 +344,15 @@ async def get_sync_status():
     """Last sync stats — used by the UI to render '上次同步: 5 分鐘前'."""
     cfg = _load_sheets_config()
     meta = _load_sync_meta()
+    bm = _bm()
+    pending_local = sum(1 for b in bm.list_bookmarks() if b.source == "local")
     return {
         "configured": bool(cfg.get("sheet_id")),
         "sheet_id": cfg.get("sheet_id", ""),
         "tab_name": cfg.get("tab_name", "bookmarks"),
+        "webhook_url": cfg.get("webhook_url", ""),
+        "webhook_configured": bool(cfg.get("webhook_url")),
+        "pending_local_count": pending_local,
         "last_synced_at": meta.get("last_synced_at", ""),
         "total_count": meta.get("total_count", 0),
         "per_category": meta.get("per_category", {}),
@@ -363,4 +410,88 @@ async def sync_from_sheets():
         "status": "ok",
         **meta,
         "skipped_rows": result.skipped_rows,
+    }
+
+
+# ── Phase B2: one-button upload of local bookmarks via Apps Script ────────
+
+@router.post("/upload")
+async def upload_local_bookmarks():
+    """POST every source="local" bookmark to the user's Apps Script webhook.
+    On the script's "added" / "skipped" reply, mark successfully-uploaded
+    records source="cloud" so they don't get re-sent next time.
+
+    Returns a structured summary the UI shows in a toast — added vs.
+    skipped (typically duplicates the script noticed before insert)."""
+    import httpx
+
+    cfg = _load_sheets_config()
+    webhook = (cfg.get("webhook_url") or "").strip()
+    if not webhook:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "no_webhook",
+                    "message": "尚未設定 Apps Script webhook URL。請先按 ⚙ 設定。"},
+        )
+
+    bm = _bm()
+    payload = merge_unique_local_into_upload_payload(bm.store)
+    if not payload:
+        return {"status": "noop", "uploaded": 0, "skipped": 0, "message": "沒有待上傳的本地書籤"}
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            resp = await client.post(webhook, json=payload)
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "webhook_unreachable",
+                    "message": f"無法連線 webhook: {e}"},
+        )
+
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "webhook_http_error",
+                    "message": f"webhook 回應 {resp.status_code}: {resp.text[:200]}"},
+        )
+
+    try:
+        result = resp.json()
+    except ValueError:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "webhook_bad_response",
+                    "message": f"webhook 回應不是 JSON: {resp.text[:200]}"},
+        )
+
+    if "error" in result:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "webhook_error",
+                    "message": f"webhook 錯誤: {result['error']}"},
+        )
+
+    # Index uploaded coords so we know which local records to flip to cloud.
+    # Apps Script returns added_items as [{name, lat, lng}, ...].
+    from services.sheets_sync import _coord_key
+    added_keys = {
+        _coord_key(item["lat"], item["lng"])
+        for item in (result.get("added_items") or [])
+        if "lat" in item and "lng" in item
+    }
+    flipped = 0
+    for b in bm.list_bookmarks():
+        if b.source == "local" and _coord_key(b.lat, b.lng) in added_keys:
+            b.source = "cloud"
+            flipped += 1
+    if flipped:
+        bm._save()
+
+    return {
+        "status": "ok",
+        "uploaded": result.get("added", 0),
+        "skipped": result.get("skipped", 0),
+        "flipped_to_cloud": flipped,
+        "skipped_items": result.get("skipped_items", []),
     }
