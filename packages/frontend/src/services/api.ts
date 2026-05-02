@@ -151,7 +151,33 @@ export const updateCategory = (id: string, cat: any) => request<any>('PUT', `/ap
 export const deleteCategory = (id: string) => request<any>('DELETE', `/api/bookmarks/categories/${id}`)
 
 export const bookmarksExportUrl = () => `${API}/api/bookmarks/export`
-export const importBookmarks = (data: any) => request<{ imported: number }>('POST', '/api/bookmarks/import', data)
+export interface ImportResult {
+  imported: number
+  skipped_duplicates: number
+  errors: string[]
+}
+export const importBookmarksCsv = (csv: string) =>
+  request<ImportResult>('POST', '/api/bookmarks/import', { csv })
+
+// ── Bookmarks Sheets sync (Phase B1) ──────────────────────────────
+export interface SyncStatus {
+  configured: boolean
+  sheet_id: string
+  tab_name: string
+  last_synced_at: string
+  total_count: number
+  per_category: Record<string, number>
+  added: number
+  updated: number
+  removed: number
+}
+export const getSyncStatus = () => request<SyncStatus>('GET', '/api/bookmarks/sync/status')
+export const setSyncConfig = (sheet_url_or_id: string, tab_name?: string) =>
+  request<{ status: string; sheet_id: string; tab_name: string }>(
+    'PUT', '/api/bookmarks/sync/config', { sheet_url_or_id, tab_name },
+  )
+export const syncBookmarks = () =>
+  request<SyncStatus & { status: string; skipped_rows: string[] }>('POST', '/api/bookmarks/sync')
 
 export const openLog = () => request<{ status: string; path: string }>('POST', '/api/system/open-log')
 export const openLogFolder = () => request<{ status: string; path: string }>('POST', '/api/system/open-log-folder')

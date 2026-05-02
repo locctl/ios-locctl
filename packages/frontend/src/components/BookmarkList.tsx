@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { useT } from '../i18n';
+import BookmarkSyncBar from './BookmarkSyncBar';
+import type { SyncStatus } from '../services/api';
 
 interface Bookmark {
   id?: string;
@@ -7,8 +9,11 @@ interface Bookmark {
   lat: number;
   lng: number;
   category: string;
-  address?: string;
+  country?: string;
   note?: string;
+  source?: 'cloud' | 'local';
+  added_by?: string;
+  added_at?: string;
 }
 
 interface Position {
@@ -28,6 +33,11 @@ interface BookmarkListProps {
   onCategoryDelete: (name: string) => void;
   onImport?: (file: File) => Promise<void>;
   exportUrl?: string;
+  // Phase B1 — Sheets sync
+  syncStatus?: SyncStatus | null;
+  syncing?: boolean;
+  onSync?: () => Promise<void>;
+  onSetSyncConfig?: (urlOrId: string) => Promise<void>;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -61,6 +71,10 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   onCategoryDelete,
   onImport,
   exportUrl,
+  syncStatus,
+  syncing,
+  onSync,
+  onSetSyncConfig,
 }) => {
   const t = useT();
   // Backend may store the built-in default category as the Chinese '預設'.
@@ -69,24 +83,78 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [showCategoryMgr, setShowCategoryMgr] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+  // Filter by source: all | cloud | local. Persists across reloads so a
+  // user who likes the "我的" view doesn't have to re-pick every session.
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'cloud' | 'local'>(() => {
+    try { return (localStorage.getItem('bm.sourceFilter') as any) || 'all'; }
+    catch { return 'all'; }
+  });
+  const setFilter = (v: 'all' | 'cloud' | 'local') => {
+    setSourceFilter(v);
+    try { localStorage.setItem('bm.sourceFilter', v); } catch { /* ignore */ }
+  };
 
   const toggleCategory = (cat: string) => {
     setCollapsed((prev) => ({ ...prev, [cat]: !prev[cat] }));
   };
 
+  // Apply source filter once before grouping so empty categories collapse out.
+  const filtered = sourceFilter === 'all'
+    ? bookmarks
+    : bookmarks.filter((bm) => (bm.source || 'cloud') === sourceFilter);
+
+  const cloudCount = bookmarks.filter((bm) => (bm.source || 'cloud') === 'cloud').length;
+  const localCount = bookmarks.filter((bm) => bm.source === 'local').length;
+
   const bookmarksByCategory = categories.reduce<Record<string, Bookmark[]>>((acc, cat) => {
-    acc[cat] = bookmarks.filter((bm) => bm.category === cat);
+    acc[cat] = filtered.filter((bm) => bm.category === cat);
     return acc;
   }, {});
 
   // Include uncategorized
-  const uncategorized = bookmarks.filter((bm) => !categories.includes(bm.category));
+  const uncategorized = filtered.filter((bm) => !categories.includes(bm.category));
   if (uncategorized.length > 0) {
     bookmarksByCategory['Uncategorized'] = uncategorized;
   }
 
   return (
     <div>
+      {/* Sheets sync bar (Phase B1) */}
+      {onSync && onSetSyncConfig && (
+        <BookmarkSyncBar
+          status={syncStatus ?? null}
+          syncing={!!syncing}
+          onSync={onSync}
+          onSetConfig={onSetSyncConfig}
+        />
+      )}
+
+      {/* Source filter tabs (Phase B1) */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 8, fontSize: 11 }}>
+        {([
+          ['all', `全部 ${bookmarks.length}`],
+          ['cloud', `☁ 雲端 ${cloudCount}`],
+          ['local', `📍 我的 ${localCount}`],
+        ] as Array<[typeof sourceFilter, string]>).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setFilter(key)}
+            style={{
+              padding: '3px 9px',
+              borderRadius: 4,
+              border: '1px solid',
+              borderColor: sourceFilter === key ? 'rgba(108, 140, 255, 0.55)' : 'rgba(255,255,255,0.08)',
+              background: sourceFilter === key ? 'rgba(108, 140, 255, 0.18)' : 'transparent',
+              color: sourceFilter === key ? '#a8bdff' : 'rgba(255,255,255,0.55)',
+              cursor: 'pointer',
+              fontSize: 11,
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Header with add / manage buttons */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
         <button
@@ -105,7 +173,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
           <a
             className="action-btn"
             href={exportUrl}
-            download="bookmarks.json"
+            download="bookmarks.csv"
             style={{ padding: '3px 8px', fontSize: 12, marginLeft: 'auto', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3 }}
             title={t('bm.export_tooltip')}
           >
@@ -131,7 +199,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
             {t('bm.import')}
             <input
               type="file"
-              accept="application/json,.json"
+              accept="text/csv,.csv"
               style={{ display: 'none' }}
               onChange={async (e) => {
                 const f = e.target.files?.[0];
@@ -325,7 +393,19 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                   </svg>
                   <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                     <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: 13, fontWeight: 600 }}>
-                      {bm.address ? `${bm.name} (${bm.address})` : bm.name}
+                      <span
+                        title={bm.source === 'local' ? '本地未上傳' : '共編知識庫'}
+                        style={{
+                          display: 'inline-block',
+                          width: 14,
+                          fontSize: 10,
+                          opacity: bm.source === 'local' ? 0.85 : 0.45,
+                          color: bm.source === 'local' ? '#ffc107' : '#7dd87d',
+                        }}
+                      >
+                        {bm.source === 'local' ? '📍' : '☁'}
+                      </span>
+                      {bm.country ? `${bm.name} (${bm.country})` : bm.name}
                     </span>
                     <span
                       style={{

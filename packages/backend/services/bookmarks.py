@@ -258,26 +258,35 @@ class BookmarkManager:
         name: str,
         lat: float,
         lng: float,
-        address: str = "",
+        country: str = "",
         note: str = "",
         category_id: str = "default",
+        added_by: str = "",
+        added_at: str = "",
     ) -> Bookmark:
-        """Create a new bookmark."""
-        # Validate category
+        """Create a new bookmark.
+
+        New records default to ``source="local"`` — they only become "cloud"
+        once the user uploads them via Phase B2.
+        """
         if self._find_category(category_id) is None:
             category_id = "default"
 
         now = _now_iso()
+        from datetime import date
         bm = Bookmark(
             id=str(uuid.uuid4()),
             name=name,
             lat=lat,
             lng=lng,
-            address=address,
+            country=country,
             note=note,
             category_id=category_id,
             created_at=now,
             last_used_at=now,
+            added_by=added_by,
+            added_at=added_at or date.today().isoformat(),
+            source="local",
         )
         self.store.bookmarks.append(bm)
         self._save()
@@ -289,7 +298,8 @@ class BookmarkManager:
         if bm is None:
             return None
 
-        allowed = {"name", "lat", "lng", "address", "note", "category_id", "last_used_at"}
+        allowed = {"name", "lat", "lng", "country", "note", "category_id",
+                   "last_used_at", "added_by", "added_at", "source"}
         for key, value in kwargs.items():
             if key in allowed and value is not None:
                 setattr(bm, key, value)

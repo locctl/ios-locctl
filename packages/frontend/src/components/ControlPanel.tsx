@@ -88,6 +88,11 @@ interface ControlPanelProps {
   onCategoryDelete: (name: string) => void;
   onBookmarkImport?: (file: File) => Promise<void>;
   bookmarkExportUrl?: string;
+  // Phase B1 — Sheets sync passthrough
+  bookmarkSyncStatus?: import('../services/api').SyncStatus | null;
+  bookmarkSyncing?: boolean;
+  onBookmarkSync?: () => Promise<void>;
+  onBookmarkSetSyncConfig?: (urlOrId: string) => Promise<void>;
   savedRoutes: SavedRoute[];
   onRouteLoad: (id: string) => void;
   onRouteSave: (name: string) => void;
@@ -196,6 +201,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onCategoryDelete,
   onBookmarkImport,
   bookmarkExportUrl,
+  bookmarkSyncStatus,
+  bookmarkSyncing,
+  onBookmarkSync,
+  onBookmarkSetSyncConfig,
   savedRoutes,
   onRouteLoad,
   onRouteSave,
@@ -657,6 +666,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   onCategoryDelete={onCategoryDelete}
                   onImport={onBookmarkImport}
                   exportUrl={bookmarkExportUrl}
+                  syncStatus={bookmarkSyncStatus}
+                  syncing={bookmarkSyncing}
+                  onSync={onBookmarkSync}
+                  onSetSyncConfig={onBookmarkSetSyncConfig}
                 />
               ) : (
                 <>

@@ -7,9 +7,14 @@ export interface Bookmark {
   lat: number
   lng: number
   category_id?: string
-  address?: string
   note?: string
   created_at?: string
+  // Phase A — cloud-coediting fields
+  country?: string
+  added_by?: string
+  added_at?: string
+  source?: 'cloud' | 'local'
+  last_interacted_at?: string
 }
 
 export interface BookmarkCategory {
@@ -23,6 +28,9 @@ export function useBookmarks() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [categories, setCategories] = useState<BookmarkCategory[]>([])
   const [loading, setLoading] = useState(false)
+  // Phase B1 — Sheets sync state
+  const [syncStatus, setSyncStatus] = useState<api.SyncStatus | null>(null)
+  const [syncing, setSyncing] = useState(false)
   const mountedRef = useRef(true)
 
   const refresh = useCallback(async () => {
@@ -42,14 +50,39 @@ export function useBookmarks() {
     }
   }, [])
 
+  const refreshSyncStatus = useCallback(async () => {
+    try {
+      const s = await api.getSyncStatus()
+      if (mountedRef.current) setSyncStatus(s)
+    } catch (err) {
+      console.error('Failed to load sync status:', err)
+    }
+  }, [])
+
   // Load on mount
   useEffect(() => {
     mountedRef.current = true
     refresh()
+    refreshSyncStatus()
     return () => {
       mountedRef.current = false
     }
-  }, [refresh])
+  }, [refresh, refreshSyncStatus])
+
+  const syncFromSheets = useCallback(async () => {
+    setSyncing(true)
+    try {
+      await api.syncBookmarks()
+      await Promise.all([refresh(), refreshSyncStatus()])
+    } finally {
+      if (mountedRef.current) setSyncing(false)
+    }
+  }, [refresh, refreshSyncStatus])
+
+  const setSheetConfig = useCallback(async (urlOrId: string, tabName?: string) => {
+    await api.setSyncConfig(urlOrId, tabName)
+    await refreshSyncStatus()
+  }, [refreshSyncStatus])
 
   const createBookmark = useCallback(
     async (bm: Omit<Bookmark, 'id'>) => {
@@ -123,5 +156,11 @@ export function useBookmarks() {
     deleteCategory,
     updateCategory,
     refresh,
+    // Phase B1
+    syncStatus,
+    syncing,
+    syncFromSheets,
+    setSheetConfig,
+    refreshSyncStatus,
   }
 }

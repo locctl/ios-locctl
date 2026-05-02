@@ -31,6 +31,15 @@ else:
 
 SETTINGS_FILE = DATA_DIR / "settings.json"
 BOOKMARKS_FILE = DATA_DIR / "bookmarks.json"
+SHEETS_CONFIG_FILE = DATA_DIR / "sheets_config.json"
+SHEETS_SYNC_META_FILE = DATA_DIR / "sheets_sync_meta.json"
+BOOKMARKS_LOCAL_BACKUP_FILE = DATA_DIR / "bookmarks.local_backup.json"
+
+# Default community-curated bookmarks Sheet — comes pre-configured so a
+# fresh install can sync without the user having to find a URL anywhere.
+# User's own sheet_id (set via the in-app config modal) overrides this.
+DEFAULT_SHEET_ID = "1GDTyBgBzkBiOAEc8GdlaS7pKmPWq2cMdYNLjqNwjdiU"
+DEFAULT_SHEET_TAB = "bookmarks"
 
 # OSRM
 OSRM_BASE_URL = "https://router.project-osrm.org"

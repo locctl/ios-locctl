@@ -160,7 +160,7 @@ const App: React.FC = () => {
       mode: 'create',
       value: {
         name: '',
-        address: '',
+        country: '',
         note: '',
         lat: lat != null ? String(roundCoord6(lat)) : '',
         lng: lng != null ? String(roundCoord6(lng)) : '',
@@ -175,7 +175,7 @@ const App: React.FC = () => {
       id: bookmark.id,
       value: {
         name: bookmark.name || '',
-        address: bookmark.address || '',
+        country: bookmark.country || '',
         note: bookmark.note || '',
         lat: bookmark.lat != null ? String(roundCoord6(bookmark.lat)) : '',
         lng: bookmark.lng != null ? String(roundCoord6(bookmark.lng)) : '',
@@ -198,7 +198,7 @@ const App: React.FC = () => {
           name,
           lat,
           lng,
-          address: value.address.trim(),
+          country: value.country.trim(),
           note: value.note.trim(),
           category_id: cat?.id || 'default',
         })
@@ -207,7 +207,7 @@ const App: React.FC = () => {
           name,
           lat,
           lng,
-          address: value.address.trim(),
+          country: value.country.trim(),
           note: value.note.trim(),
           category_id: cat?.id || 'default',
         })
@@ -432,14 +432,17 @@ const App: React.FC = () => {
   const handleBookmarkImport = useCallback(async (file: File) => {
     try {
       const text = await file.text()
-      const data = JSON.parse(text)
-      const res = await api.importBookmarks(data)
+      const res = await api.importBookmarksCsv(text)
       await bm.refresh()
-      showToast(t('bm.import_success', { n: res.imported }))
+      const dup = res.skipped_duplicates
+        ? `,跳過重複 ${res.skipped_duplicates}` : ''
+      const errMsg = res.errors?.length
+        ? `,${res.errors.length} 列格式錯誤(詳見 log)` : ''
+      showToast(`匯入 ${res.imported} 筆${dup}${errMsg}`)
     } catch (err: any) {
-      showToast(t('bm.import_failed', { error: err?.message || 'unknown' }))
+      showToast(`匯入失敗: ${err?.message || 'unknown'}`)
     }
-  }, [bm, showToast, t])
+  }, [bm, showToast])
 
   const handleRouteRename = useCallback(async (id: string, name: string) => {
     try {
@@ -553,8 +556,11 @@ const App: React.FC = () => {
             lat: b.lat,
             lng: b.lng,
             category: bm.categories.find(c => c.id === b.category_id)?.name || t('bm.default'),
-            address: (b as any).address || '',
+            country: (b as any).country || '',
             note: b.note || '',
+            source: (b as any).source || 'cloud',
+            added_by: (b as any).added_by || '',
+            added_at: (b as any).added_at || '',
           }))}
           bookmarkCategories={bm.categories.map(c => c.name)}
           onBookmarkClick={(b: any) => handleSelectTarget(b.lat, b.lng, { label: b.name, source: 'bookmark' })}
@@ -568,6 +574,10 @@ const App: React.FC = () => {
           }}
           onBookmarkImport={handleBookmarkImport}
           bookmarkExportUrl={api.bookmarksExportUrl()}
+          bookmarkSyncStatus={bm.syncStatus}
+          bookmarkSyncing={bm.syncing}
+          onBookmarkSync={bm.syncFromSheets}
+          onBookmarkSetSyncConfig={bm.setSheetConfig}
           savedRoutes={savedRoutes.map(r => ({ id: r.id, name: r.name, waypoints: r.waypoints ?? [] }))}
           onRouteGpxImport={handleGpxImport}
           onRouteGpxExport={handleGpxExport}
@@ -833,7 +843,7 @@ const App: React.FC = () => {
           categories={bm.categories.map(c => c.name)}
           value={bookmarkDialog?.value ?? {
             name: '',
-            address: '',
+            country: '',
             note: '',
             lat: '',
             lng: '',

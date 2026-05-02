@@ -4,7 +4,7 @@ import { useT } from '../i18n';
 
 export interface BookmarkDialogValue {
   name: string;
-  address: string;
+  country: string;
   note: string;
   lat: string;
   lng: string;
@@ -104,9 +104,9 @@ const BookmarkDialog: React.FC<BookmarkDialogProps> = ({
         <input
           type="text"
           className="search-input"
-          placeholder={t('bm.address_placeholder')}
-          value={value.address}
-          onChange={(e) => update({ address: e.target.value })}
+          placeholder={t('bm.country_placeholder')}
+          value={value.country}
+          onChange={(e) => update({ country: e.target.value })}
           style={{ width: '100%', marginBottom: 8 }}
         />
         <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
