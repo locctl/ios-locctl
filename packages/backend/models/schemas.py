@@ -155,15 +155,27 @@ class BookmarkCategory(BaseModel):
 
 
 class Bookmark(BaseModel):
+    """A geographic bookmark.
+
+    `source` distinguishes "cloud" (synced from the shared Google Sheet) from
+    "local" (added in-app, not yet uploaded). Identity for dedup across the
+    cloud/local boundary is the rounded ``lat,lng`` pair — see
+    bookmark_status keys and the upload-to-cloud flow.
+    """
     id: str = ""
     name: str
     lat: float
     lng: float
-    address: str = ""
     note: str = ""
     category_id: str = "default"
     created_at: str = ""
     last_used_at: str = ""
+    # Phase A additions:
+    country: str = ""           # free-form ("日本" / "JP" / "京都")
+    added_by: str = ""          # nickname of contributor
+    added_at: str = ""          # YYYY-MM-DD
+    source: str = "local"       # "cloud" (synced from Sheets) | "local" (in-app, not yet uploaded)
+    last_interacted_at: str = ""  # injected from local status store; never written to Sheets
 
 
 class BookmarkMoveRequest(BaseModel):

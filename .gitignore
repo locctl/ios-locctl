@@ -33,6 +33,8 @@ npm-debug.log*
 
 # State files
 data/settings.json
+# One-shot migration safety net produced by scripts/migrate_bookmarks.py
+data/bookmarks_pre_migration.json
 
 # Temp
 *.tmp

@@ -20,11 +20,12 @@ def _now_iso() -> str:
 
 
 GROUP_ORDER = [
-    ("default", "預設"),
+    ("default", "未分類"),                # was 預設
+    ("mushroom_spots", "蘑菇點"),         # new (Phase A)
     ("postcards_flower", "明信片花點"),
     ("postcards_mushroom", "明信片菇點"),
-    ("postcards_hidden", "隱藏明信片"),
     ("decorations_pure", "裝飾純點"),
+    # 「隱藏明信片」(postcards_hidden) merged into 明信片菇點 in migration
 ]
 
 NAME_TO_ID = {name: cat_id for cat_id, name in GROUP_ORDER}
@@ -54,7 +55,7 @@ def _group_for_bookmark(bm: Bookmark) -> str:
         return name
     if name in ID_TO_NAME:
         return ID_TO_NAME[name]
-    return "預設"
+    return "未分類"
 
 
 def _serialize_grouped(store: BookmarkStore) -> dict[str, list[dict[str, Any]]]:
@@ -62,13 +63,16 @@ def _serialize_grouped(store: BookmarkStore) -> dict[str, list[dict[str, Any]]]:
 
     cat_name_by_id = {c.id: c.name for c in store.categories}
     for bm in store.bookmarks:
-        cat_name = cat_name_by_id.get(bm.category_id, "預設")
+        cat_name = cat_name_by_id.get(bm.category_id, "未分類")
         grouped.setdefault(cat_name, []).append(
             {
                 "name": bm.name,
                 "lat": bm.lat,
                 "lng": bm.lng,
-                "address": bm.address,
+                "country": bm.country,
+                "added_by": bm.added_by,
+                "added_at": bm.added_at,
+                "source": bm.source,
                 "note": bm.note,
             }
         )
@@ -108,11 +112,17 @@ def _load_grouped_style(data: dict[str, Any]) -> BookmarkStore:
                         name=str(item.get("name", "")).strip(),
                         lat=float(item.get("lat")),
                         lng=float(item.get("lng")),
-                        address=str(item.get("address", "") or ""),
                         note=str(item.get("note", "") or ""),
                         category_id=cat.id,
                         created_at=_now_iso(),
                         last_used_at=_now_iso(),
+                        country=str(item.get("country", "") or ""),
+                        added_by=str(item.get("added_by", "") or ""),
+                        added_at=str(item.get("added_at", "") or ""),
+                        # Fall back to "cloud" for legacy data — pre-Phase-A
+                        # bookmarks are the seed set, so they belong to the
+                        # shared knowledge base by default.
+                        source=str(item.get("source", "cloud") or "cloud"),
                     )
                 )
             except Exception:
