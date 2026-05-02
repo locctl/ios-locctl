@@ -49,6 +49,17 @@ function currentLang(): 'zh' | 'en' {
 
 function formatError(detail: unknown, fallback: string): string {
   if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    const first = detail[0]
+    if (first && typeof first === 'object') {
+      const d = first as { msg?: string; loc?: Array<string | number> }
+      if (d.msg) {
+        const where = Array.isArray(d.loc) ? d.loc.join('.') : ''
+        return where ? `${where}: ${d.msg}` : d.msg
+      }
+    }
+    return fallback
+  }
   if (detail && typeof detail === 'object') {
     const d = detail as { code?: string; message?: string }
     if (d.code === 'remote_pair_failed' && d.message) return d.message
@@ -94,16 +105,16 @@ const pp = (o?: PauseOpts) => (o ? {
   pause_min: o.pause_min ?? 5,
   pause_max: o.pause_max ?? 20,
 } : {})
-export const navigate = (lat: number, lng: number, mode: string, speed?: SpeedOpts) =>
-  request<any>('POST', '/api/location/navigate', { lat, lng, mode, ...sp(speed) })
+export const navigate = (lat: number, lng: number, mode: string, speed?: SpeedOpts, direct_route = false) =>
+  request<any>('POST', '/api/location/navigate', { lat, lng, mode, direct_route, ...sp(speed) })
 export const startLoop = (waypoints: { lat: number; lng: number }[], mode: string, speed?: SpeedOpts, pause?: PauseOpts, direct_route = false) =>
   request<any>('POST', '/api/location/loop', { waypoints, mode, direct_route, ...sp(speed), ...pp(pause) })
 export const multiStop = (waypoints: { lat: number; lng: number }[], mode: string, stop_duration: number, loop: boolean, speed?: SpeedOpts, pause?: PauseOpts, direct_route = false) =>
   request<any>('POST', '/api/location/multistop', { waypoints, mode, stop_duration, loop, direct_route, ...sp(speed), ...pp(pause) })
-export const randomWalk = (center: { lat: number; lng: number }, radius_m: number, mode: string, speed?: SpeedOpts, pause?: PauseOpts) =>
-  request<any>('POST', '/api/location/randomwalk', { center, radius_m, mode, ...sp(speed), ...pp(pause) })
-export const joystickStart = (mode: string) =>
-  request<any>('POST', '/api/location/joystick/start', { mode })
+export const randomWalk = (center: { lat: number; lng: number }, radius_m: number, mode: string, speed?: SpeedOpts, pause?: PauseOpts, direct_route = false) =>
+  request<any>('POST', '/api/location/randomwalk', { center, radius_m, mode, direct_route, ...sp(speed), ...pp(pause) })
+export const joystickStart = (mode: string, speed?: SpeedOpts) =>
+  request<any>('POST', '/api/location/joystick/start', { mode, ...sp(speed) })
 export const joystickStop = () => request<any>('POST', '/api/location/joystick/stop')
 export const pauseSim = () => request<any>('POST', '/api/location/pause')
 export const resumeSim = () => request<any>('POST', '/api/location/resume')

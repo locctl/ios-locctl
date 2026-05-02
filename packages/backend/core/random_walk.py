@@ -22,12 +22,69 @@ class RandomWalkHandler:
     def __init__(self, engine):
         self.engine = engine
 
+    async def _pick_routable_destination(
+        self,
+        center: Coordinate,
+        current: Coordinate,
+        radius_m: float,
+        mode: MovementMode,
+        *,
+        direct_route: bool,
+        max_attempts: int = 12,
+    ) -> tuple[Coordinate, object] | None:
+        """Try several random targets until one produces a usable route.
+
+        For road mode, many random points inside the radius can land in places
+        OSRM cannot route to directly (inside buildings, parks, tiny alleys).
+        That used to make random walk appear "broken" and then self-stop after
+        a few consecutive failures. We keep sampling until we find a routable
+        leg instead of treating each bad sample as a fatal leg error.
+        """
+        engine = self.engine
+
+        for attempt in range(1, max_attempts + 1):
+            dest_lat, dest_lng = RouteInterpolator.random_point_in_radius(
+                center.lat, center.lng, radius_m,
+            )
+            dest = Coordinate(lat=dest_lat, lng=dest_lng)
+            try:
+                route = await engine.route_planner.plan_leg(
+                    current,
+                    dest,
+                    mode,
+                    direct_route=direct_route,
+                )
+            except RuntimeError as exc:
+                msg = str(exc)
+                if "OSRM error" in msg:
+                    logger.debug(
+                        "Random walk candidate %d/%d not routable: %s",
+                        attempt,
+                        max_attempts,
+                        msg,
+                    )
+                    continue
+                raise
+
+            if len(route.coords) >= 2:
+                return dest, route
+
+            logger.debug(
+                "Random walk candidate %d/%d too short (%d points)",
+                attempt,
+                max_attempts,
+                len(route.coords),
+            )
+
+        return None
+
     async def start(
         self,
         center: Coordinate,
         radius_m: float,
         mode: MovementMode,
         *,
+        direct_route: bool = False,
         speed_kmh: float | None = None,
         speed_min_kmh: float | None = None,
         speed_max_kmh: float | None = None,
@@ -58,8 +115,6 @@ class RandomWalkHandler:
             )
 
         profile_name = mode.value
-        osrm_profile = "foot" if mode in (MovementMode.WALKING, MovementMode.RUNNING) else "car"
-
         engine.state = SimulationState.RANDOM_WALK
         engine.distance_traveled = 0.0
         engine.lap_count = 0
@@ -84,32 +139,45 @@ class RandomWalkHandler:
         max_consecutive_conn_errors = 60  # ~30 min at max backoff
 
         while not engine._stop_event.is_set():
-            # Pick a random destination within the radius
-            dest_lat, dest_lng = RouteInterpolator.random_point_in_radius(
-                center.lat, center.lng, radius_m,
-            )
-
             current = engine.current_position
             if current is None:
                 logger.warning("Random walk: no current position, stopping")
                 break
 
-            logger.info(
-                "Random walk leg %d: (%.6f, %.6f) → (%.6f, %.6f)",
-                walk_count + 1, current.lat, current.lng, dest_lat, dest_lng,
-            )
-
             # Get OSRM route and move along it; catch ALL errors so one
             # failed leg doesn't kill the entire random walk.
             try:
-                route_data = await engine.route_service.get_route(
-                    current.lat, current.lng,
-                    dest_lat, dest_lng,
-                    profile=osrm_profile,
+                picked = await self._pick_routable_destination(
+                    center,
+                    current,
+                    radius_m,
+                    mode,
+                    direct_route=direct_route,
+                )
+                if picked is None:
+                    logger.warning(
+                        "Random walk leg %d: no routable destination found inside %.0fm radius; retrying",
+                        walk_count + 1,
+                        radius_m,
+                    )
+                    await asyncio.sleep(1.0)
+                    continue
+
+                dest, route = picked
+                dest_lat = dest.lat
+                dest_lng = dest.lng
+
+                logger.info(
+                    "Random walk leg %d: (%.6f, %.6f) → (%.6f, %.6f)",
+                    walk_count + 1,
+                    current.lat,
+                    current.lng,
+                    dest_lat,
+                    dest_lng,
                 )
 
-                coords = [Coordinate(lat=pt[0], lng=pt[1]) for pt in route_data["coords"]]
-                engine.distance_remaining = route_data["distance"]
+                coords = route.coords
+                engine.distance_remaining = route.distance_m
 
                 if len(coords) >= 2:
                     await engine._emit("route_path", {

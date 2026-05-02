@@ -7,7 +7,7 @@ import logging
 
 from models.schemas import JoystickInput, MovementMode, SimulationState
 from services.interpolator import RouteInterpolator
-from config import SPEED_PROFILES
+from config import resolve_speed_profile
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,14 @@ class JoystickHandler:
         self._task: asyncio.Task | None = None
         self._current_input = JoystickInput(direction=0, intensity=0)
 
-    async def start(self, mode: MovementMode) -> None:
+    async def start(
+        self,
+        mode: MovementMode,
+        *,
+        speed_kmh: float | None = None,
+        speed_min_kmh: float | None = None,
+        speed_max_kmh: float | None = None,
+    ) -> None:
         """Activate joystick mode with the given movement speed profile."""
         engine = self.engine
 
@@ -45,7 +52,12 @@ class JoystickHandler:
             await engine.stop()
 
         profile_name = mode.value
-        self.speed_profile = SPEED_PROFILES[profile_name]
+        self.speed_profile = resolve_speed_profile(
+            profile_name,
+            speed_kmh=speed_kmh,
+            speed_min_kmh=speed_min_kmh,
+            speed_max_kmh=speed_max_kmh,
+        )
         self.is_active = True
         self._current_input = JoystickInput(direction=0, intensity=0)
 
@@ -78,6 +90,7 @@ class JoystickHandler:
 
                 if inp.intensity > 0 and engine.current_position is not None:
                     speed_mps = self.speed_profile["speed_mps"] * inp.intensity
+                    engine._current_speed_mps = speed_mps
                     distance = speed_mps * _TICK_INTERVAL  # meters this tick
                     jitter = self.speed_profile.get("jitter", 0.3)
 
@@ -94,8 +107,24 @@ class JoystickHandler:
                         new_lat, new_lng, jitter * 0.3,
                     )
 
-                    # Push to device
-                    await engine._set_position(new_lat, new_lng)
+                    # Push to device with the same retry tolerance as route modes.
+                    pushed = False
+                    for attempt in range(3):
+                        try:
+                            await engine._set_position(new_lat, new_lng)
+                            pushed = True
+                            break
+                        except (ConnectionError, OSError) as exc:
+                            logger.warning(
+                                "Joystick position push failed (attempt %d/3): %s",
+                                attempt + 1,
+                                exc,
+                            )
+                            await asyncio.sleep(0.2 * (attempt + 1))
+                        except asyncio.CancelledError:
+                            raise
+                    if not pushed:
+                        raise ConnectionError("無法持續推送定位到裝置,請確認裝置仍可正常接收定位更新")
 
                     # Accumulate distance
                     engine.distance_traveled += distance
@@ -114,10 +143,21 @@ class JoystickHandler:
                 await asyncio.sleep(_TICK_INTERVAL)
         except asyncio.CancelledError:
             pass
-        except Exception:
+        except Exception as exc:
             logger.exception("Joystick loop error")
+            try:
+                await engine._emit("simulation_error", {"message": str(exc) or "Joystick loop error"})
+            except Exception:
+                logger.exception("Failed to emit joystick simulation_error")
         finally:
             self.is_active = False
+            engine._current_speed_mps = 0.0
+            if engine.state == SimulationState.JOYSTICK:
+                engine.state = SimulationState.IDLE
+                try:
+                    await engine._emit("state_change", {"state": engine.state.value})
+                except Exception:
+                    logger.exception("Failed to emit idle state after joystick stop")
 
     async def stop(self) -> None:
         """Deactivate joystick mode."""

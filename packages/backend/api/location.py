@@ -195,6 +195,7 @@ async def navigate(req: NavigateRequest):
     engine = await _engine()
     asyncio.create_task(engine.navigate(
         Coordinate(lat=req.lat, lng=req.lng), req.mode,
+        direct_route=req.direct_route,
         speed_kmh=req.speed_kmh,
         speed_min_kmh=req.speed_min_kmh, speed_max_kmh=req.speed_max_kmh,
     ))
@@ -235,6 +236,7 @@ async def random_walk(req: RandomWalkRequest):
     engine = await _engine()
     asyncio.create_task(engine.random_walk(
         req.center, req.radius_m, req.mode,
+        direct_route=req.direct_route,
         speed_kmh=req.speed_kmh,
         speed_min_kmh=req.speed_min_kmh, speed_max_kmh=req.speed_max_kmh,
         pause_enabled=req.pause_enabled, pause_min=req.pause_min, pause_max=req.pause_max,
@@ -246,7 +248,12 @@ async def random_walk(req: RandomWalkRequest):
 async def joystick_start(req: JoystickStartRequest):
     engine = await _engine()
     try:
-        await engine.joystick_start(req.mode)
+        await engine.joystick_start(
+            req.mode,
+            speed_kmh=req.speed_kmh,
+            speed_min_kmh=req.speed_min_kmh,
+            speed_max_kmh=req.speed_max_kmh,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return {"status": "started", "mode": req.mode}

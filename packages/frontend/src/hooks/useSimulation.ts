@@ -14,6 +14,7 @@ export enum SimMode {
 export enum MoveMode {
   Walking = 'walking',
   Running = 'running',
+  Bicycling = 'bicycling',
   Driving = 'driving',
 }
 
@@ -32,7 +33,7 @@ export interface SimulationStatus {
 }
 
 export function useSimulation(wsMessage: WsMessage | null) {
-  const [mode, setMode] = useState<SimMode>(SimMode.Teleport)
+  const [mode, setMode] = useState<SimMode>(SimMode.Navigate)
   const [moveMode, setMoveMode] = useState<MoveMode>(MoveMode.Walking)
   const [status, setStatus] = useState<SimulationStatus>({
     running: false,
@@ -44,7 +45,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
   const [progress, setProgress] = useState(0)
   const [eta, setEta] = useState<number | null>(null)
   const [waypoints, setWaypoints] = useState<LatLng[]>([])
-  const [routePath, setRoutePath] = useState<LatLng[]>([])
+  const [activeRoutePath, setActiveRoutePath] = useState<LatLng[]>([])
   const [customSpeedKmh, setCustomSpeedKmh] = useState<number | null>(null)
   const [speedMinKmh, setSpeedMinKmh] = useState<number | null>(null)
   const [speedMaxKmh, setSpeedMaxKmh] = useState<number | null>(null)
@@ -216,7 +217,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
       case 'route_path': {
         const pts = wsMessage.data?.coords
         if (Array.isArray(pts)) {
-          setRoutePath(pts.map((p: any) => ({ lat: p.lat ?? p[0], lng: p.lng ?? p[1] })))
+          setActiveRoutePath(pts.map((p: any) => ({ lat: p.lat ?? p[0], lng: p.lng ?? p[1] })))
         }
         break
       }
@@ -224,7 +225,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
         const st = wsMessage.data?.state
         if (st === 'idle' || st === 'disconnected') {
           setStatus((prev) => ({ ...prev, running: false, paused: false, state: st }))
-          setRoutePath([])
+          setActiveRoutePath([])
         } else if (st === 'paused') {
           setStatus((prev) => ({ ...prev, paused: true, state: st }))
         } else if (st) {
@@ -244,7 +245,6 @@ export function useSimulation(wsMessage: WsMessage | null) {
   const teleport = useCallback(async (lat: number, lng: number) => {
     setError(null)
     try {
-      setMode(SimMode.Teleport)
       const res = await api.teleport(lat, lng)
       setCurrentPosition({ lat, lng })
       setDestination(null)
@@ -258,13 +258,19 @@ export function useSimulation(wsMessage: WsMessage | null) {
   }, [])
 
   const navigate = useCallback(
-    async (lat: number, lng: number) => {
+    async (lat: number, lng: number, directRoute = false) => {
       setError(null)
       try {
         setMode(SimMode.Navigate)
         setDestination({ lat, lng })
         setProgress(0)
-        const res = await api.navigate(lat, lng, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh })
+        const res = await api.navigate(
+          lat,
+          lng,
+          moveMode,
+          { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh },
+          directRoute,
+        )
         setStatus((prev) => ({ ...prev, running: true, paused: false }))
         setEffectiveSpeed({ kmh: customSpeedKmh, min: speedMinKmh, max: speedMaxKmh })
         return res
@@ -318,12 +324,19 @@ export function useSimulation(wsMessage: WsMessage | null) {
   )
 
   const randomWalk = useCallback(
-    async (center: LatLng, radiusM: number) => {
+    async (center: LatLng, radiusM: number, directRoute = false) => {
       setError(null)
       try {
         setMode(SimMode.RandomWalk)
         setProgress(0)
-        const res = await api.randomWalk(center, radiusM, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseRandomWalk.enabled, pause_min: pauseRandomWalk.min, pause_max: pauseRandomWalk.max })
+        const res = await api.randomWalk(
+          center,
+          radiusM,
+          moveMode,
+          { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh },
+          { pause_enabled: pauseRandomWalk.enabled, pause_min: pauseRandomWalk.min, pause_max: pauseRandomWalk.max },
+          directRoute,
+        )
         setStatus((prev) => ({ ...prev, running: true, paused: false }))
         setEffectiveSpeed({ kmh: customSpeedKmh, min: speedMinKmh, max: speedMaxKmh })
         return res
@@ -339,8 +352,13 @@ export function useSimulation(wsMessage: WsMessage | null) {
     setError(null)
     try {
       setMode(SimMode.Joystick)
-      const res = await api.joystickStart(moveMode)
+      const res = await api.joystickStart(moveMode, {
+        speed_kmh: customSpeedKmh,
+        speed_min_kmh: speedMinKmh,
+        speed_max_kmh: speedMaxKmh,
+      })
       setStatus((prev) => ({ ...prev, running: true, paused: false }))
+      setEffectiveSpeed({ kmh: customSpeedKmh, min: speedMinKmh, max: speedMaxKmh })
       return res
     } catch (err: any) {
       setError(err.message)
@@ -392,7 +410,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
       setStatus((prev) => ({ ...prev, running: false, paused: false }))
       setProgress(0)
       setEta(null)
-      setRoutePath([])
+      setActiveRoutePath([])
       setWaypointProgress(null)
       setEffectiveSpeed(null)
       // Clear the destination so the red "target" marker goes away —
@@ -416,7 +434,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
       setProgress(0)
       setEta(null)
       setWaypoints([])
-      setRoutePath([])
+      setActiveRoutePath([])
       setWaypointProgress(null)
       setEffectiveSpeed(null)
       return res
@@ -478,7 +496,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
     eta,
     waypoints,
     setWaypoints,
-    routePath,
+    activeRoutePath,
     customSpeedKmh,
     setCustomSpeedKmh,
     speedMinKmh,

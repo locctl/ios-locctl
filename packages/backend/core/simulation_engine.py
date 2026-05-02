@@ -21,12 +21,17 @@ from config import SPEED_PROFILES, SpeedProfile
 from core.teleport import TeleportHandler
 from core.navigator import Navigator
 from core.route_loop import RouteLooper
+from core.route_planner import RoutePlanner
 from core.joystick import JoystickHandler
 from core.multi_stop import MultiStopNavigator
 from core.random_walk import RandomWalkHandler
 from core.restore import RestoreHandler
 
 logger = logging.getLogger(__name__)
+
+
+class PositionPushFailedError(ConnectionError):
+    """Raised when we repeatedly fail to push a simulated position."""
 
 
 # ── ETA Tracker ──────────────────────────────────────────────────────────
@@ -113,6 +118,7 @@ class SimulationEngine:
 
         # Sub-handlers
         self.route_service = RouteService()
+        self.route_planner = RoutePlanner(self.route_service)
         self.eta_tracker = EtaTracker()
         self._teleport_handler = TeleportHandler(self)
         self._navigator = Navigator(self)
@@ -159,8 +165,12 @@ class SimulationEngine:
             await self._active_task
         except asyncio.CancelledError:
             logger.info("%s cancelled", label)
-        except Exception:
+        except Exception as exc:
             logger.exception("%s failed unexpectedly", label)
+            try:
+                await self._emit("simulation_error", {"message": str(exc) or f"{label} failed"})
+            except Exception:
+                logger.exception("Failed to emit simulation_error after %s", label)
         finally:
             self._active_task = None
             # Force state back to IDLE if a handler crashed / was cancelled
@@ -174,6 +184,7 @@ class SimulationEngine:
 
     async def navigate(
         self, dest: Coordinate, mode: MovementMode,
+        direct_route: bool = False,
         speed_kmh: float | None = None,
         speed_min_kmh: float | None = None,
         speed_max_kmh: float | None = None,
@@ -184,7 +195,7 @@ class SimulationEngine:
         self._pause_event.set()
         await self._run_handler(
             self._navigator.navigate_to(
-                dest, mode, speed_kmh=speed_kmh,
+                dest, mode, direct_route=direct_route, speed_kmh=speed_kmh,
                 speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
             ),
             "Navigate",
@@ -215,9 +226,20 @@ class SimulationEngine:
             "Loop",
         )
 
-    async def joystick_start(self, mode: MovementMode) -> None:
+    async def joystick_start(
+        self,
+        mode: MovementMode,
+        speed_kmh: float | None = None,
+        speed_min_kmh: float | None = None,
+        speed_max_kmh: float | None = None,
+    ) -> None:
         """Activate joystick mode."""
-        await self._joystick.start(mode)
+        await self._joystick.start(
+            mode,
+            speed_kmh=speed_kmh,
+            speed_min_kmh=speed_min_kmh,
+            speed_max_kmh=speed_max_kmh,
+        )
 
     def joystick_move(self, joystick_input: JoystickInput) -> None:
         """Update the joystick direction/intensity (non-blocking)."""
@@ -262,6 +284,7 @@ class SimulationEngine:
         center: Coordinate,
         radius_m: float,
         mode: MovementMode,
+        direct_route: bool = False,
         speed_kmh: float | None = None,
         speed_min_kmh: float | None = None,
         speed_max_kmh: float | None = None,
@@ -276,6 +299,7 @@ class SimulationEngine:
         await self._run_handler(
             self._random_walk.start(
                 center, radius_m, mode,
+                direct_route=direct_route,
                 speed_kmh=speed_kmh,
                 speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
                 pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
@@ -542,7 +566,7 @@ class SimulationEngine:
                         break
                 if not pushed:
                     logger.error("Giving up on this route after repeated push failures")
-                    break
+                    raise PositionPushFailedError("無法持續推送定位到裝置,請確認裝置仍可正常接收定位更新")
 
                 # Update tracking
                 self.distance_traveled += step_dist

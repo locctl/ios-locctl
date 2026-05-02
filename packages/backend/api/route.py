@@ -18,7 +18,7 @@ _saved_routes: dict[str, SavedRoute] = {}
 
 @router.post("/plan")
 async def plan_route(req: RoutePlanRequest):
-    profile_map = {"walking": "foot", "running": "foot", "driving": "car", "foot": "foot", "car": "car"}
+    profile_map = {"walking": "foot", "running": "foot", "bicycling": "bicycle", "driving": "car", "foot": "foot", "car": "car", "bicycle": "bicycle"}
     profile = profile_map.get(req.profile, "foot")
     result = await route_service.get_route(req.start.lat, req.start.lng, req.end.lat, req.end.lng, profile)
     return result

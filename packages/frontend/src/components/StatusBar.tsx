@@ -27,9 +27,9 @@ interface StatusBarProps {
 
 import type { StringKey } from '../i18n';
 const modeLabelKeys: Record<SimMode, StringKey> = {
-  [SimMode.Teleport]: 'mode.teleport',
+  [SimMode.Teleport]: 'mode.navigate',
   [SimMode.Navigate]: 'mode.navigate',
-  [SimMode.Loop]: 'mode.loop',
+  [SimMode.Loop]: 'mode.multi_stop',
   [SimMode.MultiStop]: 'mode.multi_stop',
   [SimMode.RandomWalk]: 'mode.random_walk',
   [SimMode.Joystick]: 'mode.joystick',

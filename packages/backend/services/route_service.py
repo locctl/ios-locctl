@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 
 import httpx
 
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 _PROFILE_MAP = {
     "walking": "foot",
     "running": "foot",
+    "bicycling": "bicycle",
     "driving": "car",
     "foot": "foot",
     "car": "car",
@@ -54,6 +56,25 @@ class RouteService:
             (end_lat, end_lng),
         ]
         return await self._fetch_route(waypoints, profile)
+
+    @staticmethod
+    def haversine_distance(
+        start_lat: float,
+        start_lng: float,
+        end_lat: float,
+        end_lng: float,
+    ) -> float:
+        """Return straight-line distance in meters between two coordinates."""
+        r = 6_371_000.0
+        rlat1 = math.radians(start_lat)
+        rlat2 = math.radians(end_lat)
+        dlat = rlat2 - rlat1
+        dlng = math.radians(end_lng - start_lng)
+        a = (
+            math.sin(dlat / 2) ** 2
+            + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlng / 2) ** 2
+        )
+        return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
     async def get_multi_route(
         self,

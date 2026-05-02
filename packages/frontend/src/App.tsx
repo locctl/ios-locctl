@@ -21,6 +21,7 @@ import { SimMode, MoveMode } from './hooks/useSimulation'
 const SPEED_MAP: Record<MoveMode, number> = {
   walking: 5,
   running: 10,
+  bicycling: 15,
   driving: 40,
 }
 
@@ -40,7 +41,8 @@ const App: React.FC = () => {
   const [randomWalkRadius, setRandomWalkRadius] = useState(500)
   const [toastMsg, setToastMsg] = useState<string | null>(null)
   const [waypointPreviewPath, setWaypointPreviewPath] = useState<{ lat: number; lng: number }[]>([])
-  const [straightRouteMode, setStraightRouteMode] = useState(false)
+  const [directRouteMode, setDirectRouteMode] = useState(false)
+  const [loopRouteMode, setLoopRouteMode] = useState(false)
   const [selectedTarget, setSelectedTarget] = useState<{ lat: number; lng: number; label?: string; source?: string } | null>(null)
   const [recenterToCurrentSignal, setRecenterToCurrentSignal] = useState(0)
   const [bookmarkDialog, setBookmarkDialog] = useState<{
@@ -123,9 +125,9 @@ const App: React.FC = () => {
   }, [sim])
 
   const handleNavigate = useCallback((lat: number, lng: number) => {
-    sim.navigate(lat, lng)
+    sim.navigate(lat, lng, directRouteMode)
     setSelectedTarget(null)
-  }, [sim])
+  }, [sim, directRouteMode])
 
   const handleAddWaypointTarget = useCallback((lat: number, lng: number) => {
     sim.setWaypoints((prev: any[]) => {
@@ -239,7 +241,7 @@ const App: React.FC = () => {
   useEffect(() => {
     let cancelled = false
     const route = sim.waypoints
-    const shouldPreview = (sim.mode === SimMode.Loop || sim.mode === SimMode.MultiStop) && route.length > 1
+    const shouldPreview = sim.mode === SimMode.MultiStop && route.length > 1
 
     if (!shouldPreview) {
       setWaypointPreviewPath([])
@@ -248,14 +250,14 @@ const App: React.FC = () => {
 
     const buildStraightPreview = () => {
       const preview = route.map((wp) => ({ lat: wp.lat, lng: wp.lng }))
-      if (sim.mode === SimMode.Loop && route.length > 1) {
+      if (loopRouteMode && route.length > 1) {
         preview.push({ lat: route[0].lat, lng: route[0].lng })
       }
       return preview
     }
 
     const run = async () => {
-      if (straightRouteMode) {
+      if (directRouteMode) {
         if (!cancelled) setWaypointPreviewPath(buildStraightPreview())
         return
       }
@@ -268,7 +270,7 @@ const App: React.FC = () => {
         const b = route[i + 1]
         legs.push([a.lat, a.lng, b.lat, b.lng])
       }
-      if (sim.mode === SimMode.Loop && route.length > 1) {
+      if (loopRouteMode && route.length > 1) {
         const last = route[route.length - 1]
         const first = route[0]
         legs.push([last.lat, last.lng, first.lat, first.lng])
@@ -308,7 +310,7 @@ const App: React.FC = () => {
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [sim.mode, sim.moveMode, sim.waypoints, straightRouteMode])
+  }, [sim.mode, sim.moveMode, sim.waypoints, directRouteMode, loopRouteMode])
 
   const handleStartWaypointRoute = useCallback(() => {
     const route = sim.waypoints
@@ -323,27 +325,32 @@ const App: React.FC = () => {
       const sameStart = first && Math.abs(first.lat - start.lat) < 1e-7 && Math.abs(first.lng - start.lng) < 1e-7
       return sameStart ? route : [{ lat: start.lat, lng: start.lng }, ...route]
     })()
-    if (sim.mode === SimMode.Loop) {
-      sim.startLoop(routeWithStart, straightRouteMode)
-    } else if (sim.mode === SimMode.MultiStop) {
-      sim.multiStop(routeWithStart, 0, false, straightRouteMode)
+    if (sim.mode === SimMode.MultiStop) {
+      sim.multiStop(routeWithStart, 0, loopRouteMode, directRouteMode)
     }
-  }, [sim, showToast, t, straightRouteMode])
+  }, [sim, showToast, t, loopRouteMode, directRouteMode])
 
   // -- ControlPanel handlers --
   const handleStart = useCallback(() => {
     if (sim.mode === SimMode.Joystick) {
       sim.joystickStart()
+    } else if (sim.mode === SimMode.Navigate) {
+      if (!selectedTarget) {
+        showToast('請先選擇目標地點')
+        return
+      }
+      sim.navigate(selectedTarget.lat, selectedTarget.lng, directRouteMode)
+      setSelectedTarget(null)
     } else if (sim.mode === SimMode.RandomWalk) {
       if (!sim.currentPosition) {
         showToast(t('toast.no_position_random'))
         return
       }
-      sim.randomWalk(sim.currentPosition, randomWalkRadius)
-    } else if (sim.mode === SimMode.Loop || sim.mode === SimMode.MultiStop) {
+      sim.randomWalk(sim.currentPosition, randomWalkRadius, directRouteMode)
+    } else if (sim.mode === SimMode.MultiStop) {
       handleStartWaypointRoute()
     }
-  }, [sim, randomWalkRadius, handleStartWaypointRoute, showToast, t])
+  }, [sim, randomWalkRadius, handleStartWaypointRoute, showToast, t, selectedTarget, directRouteMode])
 
   const handleStop = useCallback(() => {
     // Stop the active movement only — keep the simulated location in place
@@ -509,6 +516,7 @@ const App: React.FC = () => {
           onSpeedChange={(s: number) => {
             if (s <= 5) sim.setMoveMode(MoveMode.Walking)
             else if (s <= 10) sim.setMoveMode(MoveMode.Running)
+            else if (s <= 16) sim.setMoveMode(MoveMode.Bicycling)
             else sim.setMoveMode(MoveMode.Driving)
           }}
           onMoveModeChange={sim.setMoveMode}
@@ -559,7 +567,68 @@ const App: React.FC = () => {
           onPauseRandomWalkChange={sim.setPauseRandomWalk}
           onRandomWalkRadiusChange={setRandomWalkRadius}
           currentWaypointsCount={sim.waypoints.length}
-          modeExtraSection={(sim.mode === SimMode.Loop || sim.mode === SimMode.MultiStop) ? (
+          movementSection={(sim.mode === SimMode.Navigate || sim.mode === SimMode.MultiStop || sim.mode === SimMode.RandomWalk || sim.mode === SimMode.Joystick) ? (
+          <div className="section" style={{ margin: '0 0 8px 0' }}>
+            <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M3 12h18" />
+                <path d="M14 5l7 7-7 7" />
+              </svg>
+              移動方式
+            </div>
+            <div
+              className="section-content"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                gap: 6,
+              }}
+            >
+              <button
+                type="button"
+                className={`mode-btn${!directRouteMode ? ' active' : ''}`}
+                disabled={sim.mode === SimMode.Joystick}
+                onClick={() => setDirectRouteMode(false)}
+                title={sim.mode === SimMode.Joystick ? '搖桿不支援道路規劃' : '沿道路'}
+                style={{
+                  justifyContent: 'flex-start',
+                  minWidth: 0,
+                  opacity: sim.mode === SimMode.Joystick ? 0.45 : 1,
+                  cursor: sim.mode === SimMode.Joystick ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M3 18h4l3-7 4 3 3-6h4" />
+                  <circle cx="7" cy="18" r="1.6" fill="currentColor" stroke="none" />
+                  <circle cx="17" cy="8" r="1.6" fill="currentColor" stroke="none" />
+                </svg>
+                <span style={{ fontSize: 11, whiteSpace: 'normal', lineHeight: 1.15 }}>
+                  沿道路
+                </span>
+              </button>
+              <button
+                type="button"
+                className={`mode-btn${directRouteMode ? ' active' : ''}`}
+                onClick={() => setDirectRouteMode(true)}
+                title="直線移動"
+                style={{ justifyContent: 'flex-start', minWidth: 0 }}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M4 19L20 5" />
+                  <circle cx="4" cy="19" r="2" fill="currentColor" stroke="none" />
+                  <circle cx="20" cy="5" r="2" fill="currentColor" stroke="none" />
+                </svg>
+                <span style={{ fontSize: 11, whiteSpace: 'normal', lineHeight: 1.15 }}>
+                  直線移動
+                </span>
+              </button>
+              {sim.mode === SimMode.Joystick && (
+                <div style={{ gridColumn: '1 / -1', fontSize: 11, opacity: 0.55 }}>搖桿為即時自由移動，不支援道路規劃</div>
+              )}
+            </div>
+          </div>
+          ) : null}
+          modeExtraSection={(sim.mode === SimMode.MultiStop) ? (
           <div className="section" style={{ margin: '0 0 8px 0' }}>
             <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -572,17 +641,17 @@ const App: React.FC = () => {
             </div>
               <div className="section-content">
                 <PauseControl
-                  labelKey={sim.mode === SimMode.Loop ? 'pause.loop' : 'pause.multi_stop'}
-                  value={sim.mode === SimMode.Loop ? sim.pauseLoop : sim.pauseMultiStop}
-                  onChange={sim.mode === SimMode.Loop ? sim.setPauseLoop : sim.setPauseMultiStop}
+                  labelKey='pause.multi_stop'
+                  value={sim.pauseMultiStop}
+                  onChange={sim.setPauseMultiStop}
                 />
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0 8px', fontSize: 11 }}>
                   <input
                     type="checkbox"
-                    checked={straightRouteMode}
-                    onChange={(e) => setStraightRouteMode(e.target.checked)}
+                    checked={loopRouteMode}
+                    onChange={(e) => setLoopRouteMode(e.target.checked)}
                   />
-                  <span>直線導航</span>
+                  <span>循環巡迴</span>
                 </label>
               {sim.waypoints.length === 0 && (
                 <div style={{ fontSize: 12, opacity: 0.5, padding: '4px 0' }}>
@@ -723,7 +792,7 @@ const App: React.FC = () => {
           selectedTarget={selectedTarget}
           recenterToCurrentSignal={recenterToCurrentSignal}
           waypoints={sim.waypoints.map((w, i) => ({ ...w, index: i }))}
-          routePath={straightRouteMode ? waypointPreviewPath : (sim.routePath.length > 0 ? sim.routePath : waypointPreviewPath)}
+          routePath={sim.status?.running ? (sim.activeRoutePath.length > 0 ? sim.activeRoutePath : waypointPreviewPath) : waypointPreviewPath}
           randomWalkRadius={sim.mode === SimMode.RandomWalk ? randomWalkRadius : null}
           onMapClick={handleMapClick}
           onTeleport={handleTeleport}
@@ -733,7 +802,7 @@ const App: React.FC = () => {
           onAddTargetWaypoint={handleAddWaypointTarget}
           onRequestBookmarkCreateAt={openBookmarkCreateDialog}
           onAddWaypoint={handleAddWaypoint}
-          showWaypointOption={sim.mode === SimMode.Loop || sim.mode === SimMode.MultiStop || sim.mode === SimMode.Navigate}
+          showWaypointOption={sim.mode === SimMode.MultiStop || sim.mode === SimMode.Navigate}
           deviceConnected={device.connectedDevice !== null}
           onShowToast={showToast}
         />

@@ -25,6 +25,7 @@ class SimulationState(str, Enum):
 class MovementMode(str, Enum):
     WALKING = "walking"
     RUNNING = "running"
+    BICYCLING = "bicycling"
     DRIVING = "driving"
 
 
@@ -54,6 +55,7 @@ class NavigateRequest(BaseModel):
     lat: float = Field(ge=-90.0, le=90.0)
     lng: float = Field(ge=-180.0, le=180.0)
     mode: MovementMode = MovementMode.WALKING
+    direct_route: bool = False
     speed_kmh: float | None = None
     speed_min_kmh: float | None = None
     speed_max_kmh: float | None = None
@@ -89,6 +91,7 @@ class RandomWalkRequest(BaseModel):
     center: Coordinate
     radius_m: float = 500.0
     mode: MovementMode = MovementMode.WALKING
+    direct_route: bool = False
     speed_kmh: float | None = None
     speed_min_kmh: float | None = None
     speed_max_kmh: float | None = None
@@ -100,6 +103,8 @@ class RandomWalkRequest(BaseModel):
 class JoystickStartRequest(BaseModel):
     mode: MovementMode = MovementMode.WALKING
     speed_kmh: float | None = None
+    speed_min_kmh: float | None = None
+    speed_max_kmh: float | None = None
 
 
 class JoystickInput(BaseModel):

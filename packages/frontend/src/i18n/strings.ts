@@ -52,6 +52,7 @@ export const STRINGS = {
   // ── Move mode (speed presets) ────────────────
   'move.walking': { zh: '走路', en: 'Walking' },
   'move.running': { zh: '跑步', en: 'Running' },
+  'move.bicycling': { zh: '腳踏車', en: 'Bicycling' },
   'move.driving': { zh: '開車', en: 'Driving' },
 
   // ── Control panel ────────────────────────────

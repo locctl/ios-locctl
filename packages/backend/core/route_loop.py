@@ -7,7 +7,6 @@ import logging
 import random
 
 from models.schemas import Coordinate, MovementMode, SimulationState
-from services.interpolator import RouteInterpolator
 from config import resolve_speed_profile
 
 logger = logging.getLogger(__name__)
@@ -49,25 +48,17 @@ class RouteLooper:
             raise ValueError("At least 2 waypoints are required for a loop")
 
         profile_name = mode.value
-        osrm_profile = "foot" if mode in (MovementMode.WALKING, MovementMode.RUNNING) else "car"
-
         # Close the loop: append the first waypoint at the end
         closed_waypoints = list(waypoints) + [waypoints[0]]
 
-        # Build either an OSRM route or a straight-line route through all waypoints.
-        wp_tuples = [(wp.lat, wp.lng) for wp in closed_waypoints]
-        if direct_route:
-            coords = list(closed_waypoints)
-            route_distance = sum(
-                RouteInterpolator.haversine(coords[i].lat, coords[i].lng, coords[i + 1].lat, coords[i + 1].lng)
-                for i in range(len(coords) - 1)
-            )
-        else:
-            route_data = await engine.route_service.get_multi_route(
-                wp_tuples, profile=osrm_profile,
-            )
-            coords = [Coordinate(lat=pt[0], lng=pt[1]) for pt in route_data["coords"]]
-            route_distance = route_data["distance"]
+        route = await engine.route_planner.plan_waypoints(
+            waypoints,
+            mode,
+            direct_route=direct_route,
+            close_loop=True,
+        )
+        coords = route.coords
+        route_distance = route.distance_m
 
         if len(coords) < 2:
             raise ValueError("OSRM returned an empty route for the loop")

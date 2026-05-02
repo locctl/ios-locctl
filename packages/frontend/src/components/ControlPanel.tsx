@@ -99,6 +99,7 @@ interface ControlPanelProps {
   pauseRandomWalk?: { enabled: boolean; min: number; max: number };
   onPauseRandomWalkChange?: (v: { enabled: boolean; min: number; max: number }) => void;
   onRandomWalkRadiusChange: (radius: number) => void;
+  movementSection?: React.ReactNode;
   modeExtraSection?: React.ReactNode;
   currentWaypointsCount?: number;
 }
@@ -112,27 +113,10 @@ interface SectionState {
   routes: boolean;
 }
 
-const modeIcons: Record<SimMode, JSX.Element> = {
-  [SimMode.Teleport]: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="10" />
-      <line x1="12" y1="2" x2="12" y2="6" />
-      <line x1="12" y1="18" x2="12" y2="22" />
-      <line x1="2" y1="12" x2="6" y2="12" />
-      <line x1="18" y1="12" x2="22" y2="12" />
-    </svg>
-  ),
+const modeIcons: Partial<Record<SimMode, JSX.Element>> = {
   [SimMode.Navigate]: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <polygon points="3,11 22,2 13,21 11,13" />
-    </svg>
-  ),
-  [SimMode.Loop]: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <polyline points="17,1 21,5 17,9" />
-      <path d="M3 11V9a4 4 0 014-4h14" />
-      <polyline points="7,23 3,19 7,15" />
-      <path d="M21 13v2a4 4 0 01-4 4H3" />
     </svg>
   ),
   [SimMode.MultiStop]: (
@@ -164,14 +148,19 @@ const modeIcons: Record<SimMode, JSX.Element> = {
 };
 
 import type { StringKey } from '../i18n';
-const modeLabelKeys: Record<SimMode, StringKey> = {
-  [SimMode.Teleport]: 'mode.teleport',
+const modeLabelKeys: Partial<Record<SimMode, StringKey>> = {
   [SimMode.Navigate]: 'mode.navigate',
-  [SimMode.Loop]: 'mode.loop',
   [SimMode.MultiStop]: 'mode.multi_stop',
   [SimMode.RandomWalk]: 'mode.random_walk',
   [SimMode.Joystick]: 'mode.joystick',
 };
+
+const visibleModes: SimMode[] = [
+  SimMode.Navigate,
+  SimMode.MultiStop,
+  SimMode.RandomWalk,
+  SimMode.Joystick,
+]
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
   simMode,
@@ -218,6 +207,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   pauseRandomWalk,
   onPauseRandomWalkChange,
   onRandomWalkRadiusChange,
+  movementSection,
   modeExtraSection,
   currentWaypointsCount = 0,
 }) => {
@@ -319,23 +309,25 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
               gap: 6,
             }}
           >
-            {Object.values(SimMode).map((mode) => (
+            {visibleModes.map((mode) => (
               <button
                 key={mode}
                 className={`mode-btn${simMode === mode ? ' active' : ''}`}
                 onClick={() => onModeChange(mode)}
-                title={t(modeLabelKeys[mode])}
+                title={t(modeLabelKeys[mode] as StringKey)}
                 style={{ justifyContent: 'flex-start', minWidth: 0 }}
               >
                 {modeIcons[mode]}
                 <span style={{ fontSize: 11, whiteSpace: 'normal', lineHeight: 1.15 }}>
-                  {t(modeLabelKeys[mode])}
+                  {t(modeLabelKeys[mode] as StringKey)}
                 </span>
               </button>
             ))}
           </div>
         )}
       </div>
+
+      {movementSection}
 
       {modeExtraSection}
 
@@ -405,6 +397,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
               {[
                 { labelKey: 'move.walking' as const, value: 5, mode: 'walking' as MoveMode },
                 { labelKey: 'move.running' as const, value: 10, mode: 'running' as MoveMode },
+                { labelKey: 'move.bicycling' as const, value: 15, mode: 'bicycling' as MoveMode, range: [14, 16] as const },
                 { labelKey: 'move.driving' as const, value: 40, mode: 'driving' as MoveMode },
               ].map((opt) => (
                 <button
@@ -412,13 +405,22 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   className={`speed-btn${(moveMode === opt.mode && customSpeedKmh == null && speedMinKmh == null && speedMaxKmh == null) ? ' active' : ''}`}
                   onClick={() => {
                     onMoveModeChange(opt.mode);
-                    onSpeedChange(opt.value);
                     onCustomSpeedChange(null);
+                    if (opt.range) {
+                      onSpeedMinChange(opt.range[0]);
+                      onSpeedMaxChange(opt.range[1]);
+                    } else {
+                      onSpeedMinChange(null);
+                      onSpeedMaxChange(null);
+                      onSpeedChange(opt.value);
+                    }
                   }}
                   style={{ padding: '6px 4px' }}
                 >
                   <div style={{ fontSize: 12, fontWeight: 500 }}>{t(opt.labelKey)}</div>
-                  <div style={{ fontSize: 10, opacity: 0.6 }}>{opt.value} km/h</div>
+                  <div style={{ fontSize: 10, opacity: 0.6 }}>
+                    {opt.range ? `${opt.range[0]}~${opt.range[1]} km/h` : `${opt.value} km/h`}
+                  </div>
                 </button>
               ))}
             </div>

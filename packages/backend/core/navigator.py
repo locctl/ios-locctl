@@ -18,6 +18,7 @@ class Navigator:
 
     async def navigate_to(
         self, dest: Coordinate, mode: MovementMode, *,
+        direct_route: bool = False,
         speed_kmh: float | None = None,
         speed_min_kmh: float | None = None,
         speed_max_kmh: float | None = None,
@@ -41,23 +42,19 @@ class Navigator:
         profile_name = mode.value  # "walking" | "running" | "driving"
         speed_profile = resolve_speed_profile(profile_name, speed_kmh, speed_min_kmh, speed_max_kmh)
 
-        # Map movement mode to OSRM routing profile
-        osrm_profile = "foot" if mode in (MovementMode.WALKING, MovementMode.RUNNING) else "car"
-
         logger.info(
             "Navigating from (%.6f, %.6f) to (%.6f, %.6f) [%s]",
             start.lat, start.lng, dest.lat, dest.lng, profile_name,
         )
 
-        # Fetch route from OSRM
-        route_data = await engine.route_service.get_route(
-            start.lat, start.lng,
-            dest.lat, dest.lng,
-            profile=osrm_profile,
+        route = await engine.route_planner.plan_leg(
+            start,
+            dest,
+            mode,
+            direct_route=direct_route,
         )
-
-        # Convert [lat, lng] lists to Coordinate objects
-        coords = [Coordinate(lat=pt[0], lng=pt[1]) for pt in route_data["coords"]]
+        coords = route.coords
+        route_distance = route.distance_m
 
         if len(coords) < 2:
             logger.warning("Route returned fewer than 2 points; teleporting instead")
@@ -68,7 +65,7 @@ class Navigator:
         engine.total_segments = len(coords) - 1
         engine.segment_index = 0
         engine.distance_traveled = 0.0
-        engine.distance_remaining = route_data["distance"]
+        engine.distance_remaining = route_distance
 
         await engine._emit("route_path", {
             "coords": [{"lat": c.lat, "lng": c.lng} for c in coords],

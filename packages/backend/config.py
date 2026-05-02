@@ -27,6 +27,7 @@ class SpeedProfile(TypedDict):
 SPEED_PROFILES: dict[str, SpeedProfile] = {
     "walking": {"speed_mps": 1.4, "jitter": 0.3, "update_interval": 1.0},
     "running": {"speed_mps": 2.8, "jitter": 0.5, "update_interval": 1.0},
+    "bicycling": {"speed_mps": 4.2, "jitter": 0.6, "update_interval": 0.8},
     "driving": {"speed_mps": 11.1, "jitter": 1.0, "update_interval": 0.5},
 }
 
