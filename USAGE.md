@@ -8,7 +8,7 @@
 
 ### 1. 下載 dmg
 
-到 [GitHub Releases](https://github.com/mars/ios-locctl/releases) 下載最新版的 dmg。
+到 [GitHub Releases](https://github.com/locctl/ios-locctl/releases) 下載最新版的 dmg。
 **選對應你 Mac 的版本**：
 
 - Apple Silicon（M1 / M2 / M3 / M4）→ `arm64.dmg`
@@ -196,7 +196,7 @@ iOS 設計就是這樣 — 換密碼後 Developer Mode 會被停用。
 
 ## 反饋
 
-問題回報：[GitHub Issues](https://github.com/mars/ios-locctl/issues)
+問題回報：[GitHub Issues](https://github.com/locctl/ios-locctl/issues)
 
 附上資訊（log 在右下角「Log」按鈕）：
 

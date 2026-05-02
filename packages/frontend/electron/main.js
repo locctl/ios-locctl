@@ -165,8 +165,8 @@ async function createWindow() {
         const u = new URL(details.url)
         if (OSM_HOSTS.includes(u.hostname)) {
           details.requestHeaders['User-Agent'] =
-            'ios-locctl/1.0.0 (+https://github.com/mars/ios-locctl)'
-          details.requestHeaders['Referer'] = 'https://github.com/mars/ios-locctl'
+            'ios-locctl/1.0.0 (+https://github.com/locctl/ios-locctl)'
+          details.requestHeaders['Referer'] = 'https://github.com/locctl/ios-locctl'
         }
       } catch {}
       cb({ requestHeaders: details.requestHeaders })
