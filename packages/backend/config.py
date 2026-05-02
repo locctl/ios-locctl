@@ -1,10 +1,34 @@
+import os
+import shutil
+import sys
 from pathlib import Path
 from typing import TypedDict
 
-# Paths
+# ── Paths ────────────────────────────────────────────────
+# Dev mode: data/ lives at repo root next to packages/.
+# Frozen mode (Electron .app bundle): ~/.ios-locctl/data/ holds mutable user
+# state (bookmarks edits, settings); on first launch we seed it from the
+# read-only copy bundled inside the .app via Electron's IOSLOCCTL_RESOURCES_PATH.
 PROJECT_ROOT = Path(__file__).parent.parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
-DATA_DIR.mkdir(exist_ok=True)
+
+if getattr(sys, "frozen", False):
+    DATA_DIR = Path.home() / ".ios-locctl" / "data"
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _bundle_root = Path(os.environ.get("IOSLOCCTL_RESOURCES_PATH", "")) if os.environ.get("IOSLOCCTL_RESOURCES_PATH") else None
+    if _bundle_root and _bundle_root.exists():
+        # Seed bookmarks.json from the .app bundle on first run only — never
+        # overwrite a user's edits on subsequent launches.
+        _seed = _bundle_root / "data" / "bookmarks.json"
+        _target = DATA_DIR / "bookmarks.json"
+        if _seed.exists() and not _target.exists():
+            try:
+                shutil.copy2(_seed, _target)
+            except Exception:
+                pass  # non-fatal; backend will run with empty bookmarks
+else:
+    DATA_DIR = PROJECT_ROOT / "data"
+    DATA_DIR.mkdir(exist_ok=True)
+
 SETTINGS_FILE = DATA_DIR / "settings.json"
 BOOKMARKS_FILE = DATA_DIR / "bookmarks.json"
 

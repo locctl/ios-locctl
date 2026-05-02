@@ -6,8 +6,12 @@ __pycache__/
 
 # Build outputs
 dist/
-build/
 *.egg-info/
+# PyInstaller intermediate build dir (NOT packages/frontend/build/, which holds
+# source assets like icon.png and entitlements.mac.plist)
+packages/backend/build/
+# electron-builder dmg output
+packages/frontend/release/
 
 # IDE
 .claude/

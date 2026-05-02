@@ -114,19 +114,12 @@ class DeviceManager:
             logger.warning("tunnel sidecar[%s]: %s", udid, line.decode(errors="replace").rstrip())
 
     async def _spawn_tunnel_sidecar(self, args: list[str], udid: str) -> tuple[asyncio.subprocess.Process, dict]:
-        askpass = PROJECT_ROOT / "scripts" / "askpass.sh"
-        user_home = str(Path.home())
-        env = {
-            **os.environ,
-            "SUDO_ASKPASS": str(askpass),
-            "HOME": user_home,
-        }
+        sidecar_cmd, env = _resolve_sidecar_command()
         proc = await asyncio.create_subprocess_exec(
             "sudo",
             "-A",
             "--preserve-env=HOME,SUDO_ASKPASS",
-            sys.executable,
-            str(PROJECT_ROOT / "packages" / "backend" / "tunnel_sidecar.py"),
+            *sidecar_cmd,
             *args,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
@@ -842,6 +835,45 @@ class DeviceManager:
         for udid in udids:
             await self.disconnect(udid)
         logger.info("All devices disconnected")
+
+
+def _resolve_sidecar_command() -> tuple[list[str], dict[str, str]]:
+    """Build the (argv, env) pair for spawning the privileged tunnel sidecar.
+
+    Two execution contexts:
+
+    * **Dev** — backend runs as a Python script. Spawn `python tunnel_sidecar.py`
+      and resolve askpass.sh from the repo's ``scripts/`` directory.
+    * **Frozen** (PyInstaller bundled, packaged inside Electron) — `sys.executable`
+      is the backend Mach-O binary itself and cannot run a .py file. Invoke the
+      sibling ``wifi-tunnel`` binary instead. Electron sets ``SUDO_ASKPASS``
+      pointing at the bundled askpass.sh before spawning the backend, so we
+      just inherit the env here.
+    """
+    user_home = str(Path.home())
+
+    if getattr(sys, "frozen", False):
+        # PyInstaller onedir layout:
+        #   <resourcesPath>/backend/ios-locctl-backend  ← sys.executable
+        #   <resourcesPath>/wifi-tunnel/wifi-tunnel
+        backend_dir = Path(sys.executable).resolve().parent
+        sidecar_path = backend_dir.parent / "wifi-tunnel" / "wifi-tunnel"
+        sidecar_cmd = [str(sidecar_path)]
+        # Trust whatever Electron exported; don't fabricate SUDO_ASKPASS here.
+        env = {**os.environ, "HOME": user_home}
+    else:
+        askpass = PROJECT_ROOT / "scripts" / "askpass.sh"
+        sidecar_cmd = [
+            sys.executable,
+            str(PROJECT_ROOT / "packages" / "backend" / "tunnel_sidecar.py"),
+        ]
+        env = {
+            **os.environ,
+            "SUDO_ASKPASS": str(askpass),
+            "HOME": user_home,
+        }
+
+    return sidecar_cmd, env
 
 
 def _load_pair_record(udid: str | None = None) -> dict | None:

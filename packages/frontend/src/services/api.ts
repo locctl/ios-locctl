@@ -156,6 +156,14 @@ export const importBookmarks = (data: any) => request<{ imported: number }>('POS
 export const openLog = () => request<{ status: string; path: string }>('POST', '/api/system/open-log')
 export const openLogFolder = () => request<{ status: string; path: string }>('POST', '/api/system/open-log-folder')
 
+// ── Setup wizard (Phase E) ────────────────────────────────────────
+export const triggerDevModeToggle = () =>
+  request<{ status: string; udid: string; next_step: string }>('POST', '/api/device/trigger-dev-mode-toggle')
+export const enableDevMode = () =>
+  request<{ status: string; udid: string; next_step: string }>('POST', '/api/device/enable-dev-mode')
+export const mountDdi = () =>
+  request<{ status: string; udid: string }>('POST', '/api/device/mount-ddi')
+
 export const applySpeed = (mode: string, opts: { speed_kmh?: number | null; speed_min_kmh?: number | null; speed_max_kmh?: number | null }) =>
   request<{ status: string; speed_mps: number }>('POST', '/api/location/apply-speed', {
     mode,

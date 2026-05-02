@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Electron requires JIT for V8. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <!-- Electron requires unsigned executable memory for some V8 paths. -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!-- Bundled PyInstaller backend + wifi-tunnel ship dylibs (libssl.3, libcrypto.3,
+         CPython .so extensions, etc.) that aren't signed by the same team id as
+         our outer .app's ad-hoc signature. Without this entitlement, hardened
+         runtime blocks them with "library load disallowed by system policy". -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- Backend spawns `sudo -A wifi-tunnel ...` to manage the iOS tunnel.
+         Hardened runtime blocks fork+exec of unsigned children unless this
+         is set. -->
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+</dict>
+</plist>

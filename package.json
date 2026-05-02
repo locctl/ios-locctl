@@ -9,7 +9,7 @@
     "dev:fe": "pnpm --filter @ios-locctl/frontend dev",
     "dev:be": "bash scripts/start-backend.sh",
     "build:fe": "pnpm --filter @ios-locctl/frontend build",
-    "build:be": "cd packages/backend && python -m PyInstaller ios-locctl-backend.spec --noconfirm",
+    "build:be": "cd packages/backend && ../../.venv/bin/python -m PyInstaller ios-locctl-backend.spec --noconfirm && ../../.venv/bin/python -m PyInstaller wifi-tunnel.spec --noconfirm",
     "devices": "pnpm --filter @ios-locctl/cli devices",
     "jump": "pnpm --filter @ios-locctl/cli jump",
     "move": "pnpm --filter @ios-locctl/cli move",

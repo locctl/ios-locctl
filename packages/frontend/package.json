@@ -13,17 +13,19 @@
   },
   "dependencies": {
     "leaflet": "^1.9.4",
+    "marked": "^18.0.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/leaflet": "^1.9.12",
+    "@types/marked": "^6.0.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "concurrently": "^8.2.2",
     "electron": "^30.0.0",
-    "electron-builder": "^24.13.3",
+    "electron-builder": "^26.8.1",
     "typescript": "^5.5.0",
     "vite": "^5.3.0",
     "wait-on": "^7.2.0"
@@ -40,18 +42,30 @@
     ],
     "extraResources": [
       {
-        "from": "../dist-py/ios-locctl-backend",
+        "from": "../backend/dist/ios-locctl-backend",
         "to": "backend",
         "filter": [
           "**/*"
         ]
       },
       {
-        "from": "../dist-py/wifi-tunnel",
+        "from": "../backend/dist/wifi-tunnel",
         "to": "wifi-tunnel",
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "../../scripts/askpass.sh",
+        "to": "askpass.sh"
+      },
+      {
+        "from": "../../USAGE.md",
+        "to": "USAGE.md"
+      },
+      {
+        "from": "../../data/bookmarks.json",
+        "to": "data/bookmarks.json"
       }
     ],
     "mac": {
@@ -66,7 +80,10 @@
       ],
       "icon": "build/icon.png",
       "hardenedRuntime": true,
-      "gatekeeperAssess": false
+      "gatekeeperAssess": false,
+      "identity": "-",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "dmg": {
       "contents": [

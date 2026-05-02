@@ -2525,3 +2525,89 @@ input:focus-visible {
 .font-mono {
   font-family: 'SF Mono', 'Fira Code', monospace;
 }
+
+/* ── In-app USAGE.md viewer (UsageModal) ─────────────────────────── */
+.usage-md h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(108, 140, 255, 0.2);
+}
+.usage-md h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #f0f2f8;
+  margin: 28px 0 10px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.usage-md h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: #d8dde9;
+  margin: 22px 0 8px;
+}
+.usage-md h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #c7cbd9;
+  margin: 16px 0 6px;
+}
+.usage-md p { margin: 0 0 12px; }
+.usage-md ul, .usage-md ol { padding-left: 22px; margin: 0 0 12px; }
+.usage-md li { margin-bottom: 4px; }
+.usage-md a { color: #6c8cff; text-decoration: none; }
+.usage-md a:hover { text-decoration: underline; }
+.usage-md strong { color: #fff; font-weight: 600; }
+.usage-md code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  font-size: 0.9em;
+  color: #f5b969;
+}
+.usage-md pre {
+  background: #0f1117;
+  border: 1px solid rgba(108, 140, 255, 0.18);
+  padding: 12px 14px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0 0 14px;
+}
+.usage-md pre code {
+  background: transparent;
+  padding: 0;
+  color: #c7cbd9;
+}
+.usage-md hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 24px 0;
+}
+.usage-md table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 14px;
+  font-size: 13px;
+}
+.usage-md th, .usage-md td {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 6px 10px;
+  text-align: left;
+}
+.usage-md th {
+  background: rgba(108, 140, 255, 0.08);
+  color: #fff;
+  font-weight: 600;
+}
+.usage-md blockquote {
+  border-left: 3px solid #6c8cff;
+  margin: 0 0 12px;
+  padding: 4px 14px;
+  color: #aab0c0;
+  background: rgba(108, 140, 255, 0.05);
+  border-radius: 0 4px 4px 0;
+}

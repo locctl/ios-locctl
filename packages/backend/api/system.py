@@ -1,4 +1,8 @@
-"""System utility endpoints — open files / folders for the user."""
+"""System utility endpoints — open files / folders for the user.
+
+USAGE.md is rendered inline by the frontend (UsageModal.tsx imports it at
+build time via Vite ?raw), so no backend endpoint is needed for it.
+"""
 
 import logging
 import subprocess
@@ -48,3 +52,5 @@ async def open_log_folder():
         raise HTTPException(status_code=500, detail={"code": "open_log_failed",
                                                      "message": f"無法開啟資料夾:{exc}"})
     return {"status": "opened", "path": str(log_dir)}
+
+

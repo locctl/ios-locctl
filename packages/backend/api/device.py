@@ -3,11 +3,9 @@ from pydantic import BaseModel
 import asyncio
 import json
 import logging
-import os
-import sys
 from pathlib import Path
 
-from config import PROJECT_ROOT
+from core.device_manager import _resolve_sidecar_command
 from models.schemas import DeviceInfo
 
 router = APIRouter(prefix="/api/device", tags=["device"])
@@ -15,18 +13,12 @@ logger = logging.getLogger(__name__)
 
 
 async def _run_sidecar_json(*args: str) -> dict:
-    user_home = str(Path.home())
-    env = {
-        **os.environ,
-        "SUDO_ASKPASS": str(PROJECT_ROOT / "scripts" / "askpass.sh"),
-        "HOME": user_home,
-    }
+    sidecar_cmd, env = _resolve_sidecar_command()
     proc = await asyncio.create_subprocess_exec(
         "sudo",
         "-A",
         "--preserve-env=HOME,SUDO_ASKPASS",
-        sys.executable,
-        str(PROJECT_ROOT / "packages" / "backend" / "tunnel_sidecar.py"),
+        *sidecar_cmd,
         *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -212,3 +204,267 @@ async def device_info(udid: str):
         if d.udid == udid:
             return d
     raise HTTPException(status_code=404, detail="Device not found")
+
+
+# ── Setup wizard endpoints (Phase E) ────────────────────────────
+# These are deliberately ergonomic for first-time setup flow:
+# they tolerate "no device", report structured error codes the wizard
+# UI can branch on, and don't require a fully connected SimulationEngine.
+
+@router.post("/trigger-dev-mode-toggle")
+async def trigger_dev_mode_toggle():
+    """Make a single dev-service call against the connected USB device so
+    iOS surfaces the Developer Mode toggle in
+    Settings → Privacy & Security. Without this trigger, the toggle is
+    hidden by default on devices that have never been touched by Xcode
+    or any pymobiledevice3 dev tool.
+
+    Implementation: query MobileImageMounterService for whether a
+    Personalized image is mounted. The query itself is harmless when DDI
+    isn't available — what matters to iOS is that we *talked to* the
+    image mount service, which is enough to flip the AMFI bit that
+    enables the Settings toggle.
+
+    Returns ok regardless of whether DDI was present; failure to reach
+    the device at all surfaces as an HTTP 400.
+    """
+    from pymobiledevice3.lockdown import create_using_usbmux
+    from pymobiledevice3.usbmux import list_devices as mux_list_devices
+
+    try:
+        raw_devices = await mux_list_devices()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "usbmux_unavailable",
+                    "message": f"無法列出 USB 裝置: {e}"},
+        )
+
+    usb_dev = next(
+        (d for d in raw_devices if getattr(d, "connection_type", "USB") == "USB"),
+        None,
+    )
+    if usb_dev is None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "trigger_needs_usb",
+                "message": "請先用 USB 線連接裝置並按「信任這台電腦」。",
+            },
+        )
+
+    udid = usb_dev.serial
+    logger.info("dev-mode trigger requested for %s", udid)
+
+    try:
+        lockdown = await create_using_usbmux(serial=udid, autopair=True)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "trust_failed",
+                "message": f"USB 信任失敗 — 請在裝置解鎖畫面上按「信任」: {e}",
+                "udid": udid,
+            },
+        )
+
+    triggered = False
+    try:
+        from pymobiledevice3.services.mobile_image_mounter import MobileImageMounterService
+        mounter = MobileImageMounterService(lockdown=lockdown)
+        try:
+            await mounter.connect()
+            # Query is enough — even if it raises, the dev service was contacted
+            try:
+                await mounter.is_image_mounted("Personalized")
+            except Exception:
+                pass
+            triggered = True
+        finally:
+            try:
+                await mounter.close()
+            except Exception:
+                pass
+    except Exception:
+        logger.warning("MobileImageMounter trigger raised", exc_info=True)
+
+    return {
+        "status": "triggered" if triggered else "best_effort",
+        "udid": udid,
+        "next_step": (
+            "請到手機 設定 → 隱私權與安全性 → 開發者模式 開啟 toggle，"
+            "然後重新開機。如果還是看不到 toggle,請走『清密碼自動開啟』流程。"
+        ),
+    }
+
+
+@router.post("/enable-dev-mode")
+async def enable_dev_mode():
+    """Enable Developer Mode automatically via AmfiService. Requires the
+    device to have NO passcode set (Apple constraint). If a passcode is
+    set, returns 400 with code='passcode_set' so the wizard can prompt
+    the user to remove it first.
+    """
+    from pymobiledevice3.lockdown import create_using_usbmux
+    from pymobiledevice3.usbmux import list_devices as mux_list_devices
+
+    try:
+        raw_devices = await mux_list_devices()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "usbmux_unavailable",
+                    "message": f"無法列出 USB 裝置: {e}"},
+        )
+
+    usb_dev = next(
+        (d for d in raw_devices if getattr(d, "connection_type", "USB") == "USB"),
+        None,
+    )
+    if usb_dev is None:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "needs_usb",
+                    "message": "請先用 USB 線連接裝置。"},
+        )
+
+    udid = usb_dev.serial
+    try:
+        lockdown = await create_using_usbmux(serial=udid, autopair=True)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "trust_failed",
+                    "message": f"USB 信任失敗: {e}",
+                    "udid": udid},
+        )
+
+    try:
+        from pymobiledevice3.services.amfi import AmfiService
+        # AmfiService import path may vary slightly across pymobiledevice3 versions;
+        # if older versions expose DeviceHasPasscodeSetError on a different path,
+        # we still catch it via the str(e) check below.
+        try:
+            from pymobiledevice3.services.amfi import DeviceHasPasscodeSetError  # type: ignore
+        except ImportError:
+            DeviceHasPasscodeSetError = None  # type: ignore
+
+        amfi = AmfiService(lockdown)
+        await amfi.enable_developer_mode()
+        return {
+            "status": "enabled",
+            "udid": udid,
+            "next_step": "請到裝置上點「Turn On」並重新開機。重開後可以把密碼設回去。",
+        }
+    except Exception as e:
+        msg = str(e)
+        is_passcode_error = (
+            (DeviceHasPasscodeSetError is not None and isinstance(e, DeviceHasPasscodeSetError))
+            or "passcode" in msg.lower()
+        )
+        if is_passcode_error:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "passcode_set",
+                    "message": "裝置仍有密碼。請先到 設定 → Face ID 與密碼 → 關閉密碼，然後重試。",
+                    "udid": udid,
+                },
+            )
+        logger.exception("enable_developer_mode failed for %s", udid)
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "enable_failed",
+                    "message": f"無法自動開啟開發者模式: {e}",
+                    "udid": udid},
+        )
+
+
+@router.post("/mount-ddi")
+async def mount_ddi():
+    """Attempt to auto-mount the Personalized DDI on the connected USB device.
+    Wraps pymobiledevice3.services.mobile_image_mounter.auto_mount_personalized
+    with a generous timeout so a slow GitHub download doesn't hang the wizard.
+    """
+    from pymobiledevice3.lockdown import create_using_usbmux
+    from pymobiledevice3.usbmux import list_devices as mux_list_devices
+
+    try:
+        raw_devices = await mux_list_devices()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "usbmux_unavailable",
+                    "message": f"無法列出 USB 裝置: {e}"},
+        )
+
+    usb_dev = next(
+        (d for d in raw_devices if getattr(d, "connection_type", "USB") == "USB"),
+        None,
+    )
+    if usb_dev is None:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "needs_usb",
+                    "message": "請先用 USB 線連接裝置。"},
+        )
+
+    udid = usb_dev.serial
+    try:
+        lockdown = await create_using_usbmux(serial=udid, autopair=True)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "trust_failed",
+                    "message": f"USB 信任失敗: {e}",
+                    "udid": udid},
+        )
+
+    try:
+        from pymobiledevice3.services.mobile_image_mounter import (
+            MobileImageMounterService,
+            auto_mount_personalized,
+            AlreadyMountedError,
+        )
+    except ImportError as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "module_unavailable",
+                    "message": f"pymobiledevice3 mobile_image_mounter 不可用: {e}"},
+        )
+
+    # First check if already mounted — fast path
+    try:
+        mounter = MobileImageMounterService(lockdown=lockdown)
+        try:
+            await mounter.connect()
+            if await mounter.is_image_mounted("Personalized"):
+                return {"status": "already_mounted", "udid": udid}
+        finally:
+            try:
+                await mounter.close()
+            except Exception:
+                pass
+    except Exception:
+        logger.debug("DDI mount-status query failed; will try mount anyway", exc_info=True)
+
+    try:
+        await asyncio.wait_for(auto_mount_personalized(lockdown), timeout=120.0)
+        return {"status": "mounted", "udid": udid}
+    except AlreadyMountedError:
+        return {"status": "already_mounted", "udid": udid}
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail={"code": "mount_timeout",
+                    "message": "DDI 下載超過 120 秒。請確認可以連到 github.com。",
+                    "udid": udid},
+        )
+    except Exception as e:
+        logger.exception("auto_mount_personalized failed for %s", udid)
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "mount_failed",
+                    "message": f"DDI 掛載失敗: {e}",
+                    "udid": udid},
+        )

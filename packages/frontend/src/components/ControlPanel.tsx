@@ -821,6 +821,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         }}
       >
         <span>ios-locctl</span>
+        <span style={{ opacity: 0.6 }}>·</span>
+        <span style={{ opacity: 0.7 }}>by Mars</span>
       </div>
     </div>
   );

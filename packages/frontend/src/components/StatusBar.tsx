@@ -23,6 +23,8 @@ interface StatusBarProps {
   onToggleCooldown: (enabled: boolean) => void;
   onRestore?: () => void;
   onOpenLog?: () => void;
+  onOpenUsage?: () => void;
+  onResetSetup?: () => void;
 }
 
 import type { StringKey } from '../i18n';
@@ -53,6 +55,8 @@ const StatusBar: React.FC<StatusBarProps> = ({
   onToggleCooldown,
   onRestore,
   onOpenLog,
+  onOpenUsage,
+  onResetSetup,
 }) => {
   const t = useT();
   const [cooldownDisplay, setCooldownDisplay] = useState(cooldown);
@@ -220,6 +224,30 @@ const StatusBar: React.FC<StatusBarProps> = ({
               {t('status.open_log')}
             </button>
           )}
+          {onOpenUsage && (
+            <button
+              onClick={onOpenUsage}
+              title="打開使用說明"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '2px 8px',
+                fontSize: 12,
+                background: 'rgba(76, 175, 80, 0.12)',
+                border: '1px solid rgba(76, 175, 80, 0.4)',
+                color: '#7dd87d',
+                borderRadius: 4,
+                cursor: 'pointer',
+              }}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z" />
+                <path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z" />
+              </svg>
+              使用說明
+            </button>
+          )}
         </>
       )}
 
@@ -259,6 +287,25 @@ const StatusBar: React.FC<StatusBarProps> = ({
         <span style={{ fontSize: 10, opacity: 0.45, fontFamily: 'monospace' }}>
           v{APP_VERSION}
         </span>
+        {onResetSetup && (
+          <button
+            onClick={() => {
+              if (confirm('確定要重新跑首次設定流程？')) onResetSetup();
+            }}
+            title="重新跑首次設定流程"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'rgba(255,255,255,0.35)',
+              fontSize: 10,
+              cursor: 'pointer',
+              padding: '0 4px',
+              textDecoration: 'underline',
+            }}
+          >
+            重設設定
+          </button>
+        )}
       </div>
     </div>
   );

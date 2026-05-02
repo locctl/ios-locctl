@@ -15,6 +15,8 @@ import EtaBar from './components/EtaBar'
 import PauseControl from './components/PauseControl'
 import StatusBar from './components/StatusBar'
 import BookmarkDialog, { type BookmarkDialogValue } from './components/BookmarkDialog'
+import SetupWizard, { isSetupCompleted, resetSetup } from './components/SetupWizard'
+import UsageModal from './components/UsageModal'
 
 import { SimMode, MoveMode } from './hooks/useSimulation'
 
@@ -50,6 +52,8 @@ const App: React.FC = () => {
     id?: string
     value: BookmarkDialogValue
   } | null>(null)
+  const [showSetup, setShowSetup] = useState(() => !isSetupCompleted())
+  const [showUsage, setShowUsage] = useState(false)
 
   const showToast = useCallback((msg: string, ms = 2000) => {
     setToastMsg(msg)
@@ -415,6 +419,15 @@ const App: React.FC = () => {
       showToast(t('status.open_log_failed') + (err?.message ? `: ${err.message}` : ''))
     }
   }, [showToast, t])
+
+  const handleOpenUsage = useCallback(() => {
+    setShowUsage(true)
+  }, [])
+
+  const handleResetSetup = useCallback(() => {
+    resetSetup()
+    setShowSetup(true)
+  }, [])
 
   const handleBookmarkImport = useCallback(async (file: File) => {
     try {
@@ -857,6 +870,8 @@ const App: React.FC = () => {
           onToggleCooldown={handleToggleCooldown}
           onRestore={handleRestore}
           onOpenLog={handleOpenLog}
+          onOpenUsage={handleOpenUsage}
+          onResetSetup={handleResetSetup}
         />
 
         {toastMsg && (
@@ -888,6 +903,8 @@ const App: React.FC = () => {
           </div>
         )}
       </div>
+      {showSetup && <SetupWizard onComplete={() => setShowSetup(false)} onOpenUsage={() => setShowUsage(true)} />}
+      <UsageModal open={showUsage} onClose={() => setShowUsage(false)} />
     </div>
   )
 }
