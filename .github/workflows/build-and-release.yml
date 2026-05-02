@@ -1,0 +1,125 @@
+name: Build and Release
+
+# Triggers:
+#   • push of a v*-prefixed tag → build both arches + publish a GitHub Release
+#   • workflow_dispatch (manual)  → build only, no release (artifact only)
+#
+# We never publish on PRs or branch pushes — that would race with manual
+# releases and accidentally tag CI builds as the latest version (which the
+# in-app update checker reads).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed by softprops/action-gh-release to attach assets
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        # PyInstaller can't cross-compile, so we need one runner per arch
+        # the dmg should support. macos-13 = x64 (Intel), macos-14 = arm64
+        # (M-series). Both produce a separate .dmg the user picks at download.
+        include:
+          - os: macos-13
+            arch: x64
+          - os: macos-14
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install backend deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r packages/backend/requirements.txt
+          pip install -r packages/backend/requirements-build.txt
+
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build backend (PyInstaller, both binaries)
+        run: |
+          # Mirror what scripts/build-dmg.sh does, but with the system Python
+          # (CI has no .venv) — so call PyInstaller directly instead of the
+          # .venv/bin/python prefix the local pnpm script expects.
+          cd packages/backend
+          python -m PyInstaller ios-locctl-backend.spec --noconfirm
+          python -m PyInstaller wifi-tunnel.spec --noconfirm
+
+      - name: Build frontend (Vite)
+        run: pnpm build:fe
+
+      - name: Package Electron dmg (ad-hoc signed, no Apple Developer cert)
+        env:
+          # Stops electron-builder from poking the keychain for a Developer ID
+          # cert that doesn't exist on CI runners — without this it tries
+          # them all, fails noisily, then skips signing entirely.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          cd packages/frontend
+          pnpm dist
+
+      - name: Rename dmg with arch suffix
+        # electron-builder names the file ios-locctl-VERSION-ARCH.dmg already
+        # for arm64 builds, but the x64 build emits ios-locctl-VERSION.dmg.
+        # Force the suffix on both so the Release page lists them clearly.
+        run: |
+          cd packages/frontend/release
+          for f in ios-locctl-*.dmg; do
+            case "$f" in
+              *-arm64.dmg|*-x64.dmg) ;;  # already suffixed
+              *) mv "$f" "${f%.dmg}-${{ matrix.arch }}.dmg" ;;
+            esac
+          done
+          ls -lh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dmg-${{ matrix.arch }}
+          path: packages/frontend/release/ios-locctl-*.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Show what we're about to release
+        run: ls -lh dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.dmg
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          # Hardcode draft=false because we trust the tag means ship it; if
+          # we ever want a "manual approve" gate we'd flip this to true and
+          # publish from the Releases UI instead.
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') }}
