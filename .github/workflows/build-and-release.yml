@@ -16,6 +16,13 @@ on:
 permissions:
   contents: write   # needed by softprops/action-gh-release to attach assets
 
+# Forward-compatibility: GitHub will default JS actions to Node 24 on
+# 2026-06-02 (https://github.blog/changelog/2025-09-19-deprecation-of-node-20-...).
+# Opting in now silences the warning and verifies our actions cope before
+# the forced flip.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   build:
     strategy:

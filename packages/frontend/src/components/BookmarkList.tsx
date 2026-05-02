@@ -79,9 +79,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   onUploadLocal,
 }) => {
   const t = useT();
-  // Backend may store the built-in default category as the Chinese '預設'.
-  // Translate at render time so EN users see "Default" without touching storage.
-  const displayCat = (name: string) => (name === '預設' ? t('bm.default') : name);
+  const displayCat = (name: string) => name;  // backend already stores friendly names since Phase A
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [showCategoryMgr, setShowCategoryMgr] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');

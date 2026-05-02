@@ -224,7 +224,7 @@ export const STRINGS = {
   'toast.pause_countdown': { zh: '到點暫停中 · 剩餘 {n}s', en: 'Paused at waypoint · {n}s left' },
 
   // ── Bookmarks ────────────────────────────────
-  'bm.default': { zh: '預設', en: 'Default' },
+  'bm.default': { zh: '未分類', en: 'Uncategorized' },
   'bm.add_here': { zh: '在目前位置新增收藏', en: 'Add bookmark at current position' },
   'bm.add': { zh: '新增收藏', en: 'Add Bookmark' },
   'bm.add_custom': { zh: '自訂座標收藏', en: 'Custom Coordinates' },

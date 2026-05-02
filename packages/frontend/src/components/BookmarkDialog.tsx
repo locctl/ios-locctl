@@ -89,7 +89,7 @@ const BookmarkDialog: React.FC<BookmarkDialogProps> = ({
           }}
         >
           {categories.map((c) => (
-            <option key={c} value={c}>{c === '預設' ? t('bm.default') : c}</option>
+            <option key={c} value={c}>{c}</option>
           ))}
         </select>
         <input
