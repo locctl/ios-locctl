@@ -383,30 +383,19 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                       (e.currentTarget as HTMLDivElement).style.background = 'transparent';
                     }}
                   >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    style={{ opacity: 0.5, flexShrink: 0 }}
+                  <span
+                    title={bm.source === 'local' ? '本地未上傳' : '雲端共編'}
+                    style={{
+                      display: 'inline-flex',
+                      flexShrink: 0,
+                      color: bm.source === 'local' ? '#ffc107' : '#7dd87d',
+                      opacity: bm.source === 'local' ? 0.95 : 0.65,
+                    }}
                   >
-                    <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" />
-                  </svg>
+                    {bm.source === 'local' ? <PinIcon /> : <CloudIcon />}
+                  </span>
                   <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                     <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: 13, fontWeight: 600 }}>
-                      <span
-                        title={bm.source === 'local' ? '本地未上傳' : '雲端共編'}
-                        style={{
-                          display: 'inline-flex',
-                          marginRight: 4,
-                          color: bm.source === 'local' ? '#ffc107' : '#7dd87d',
-                          opacity: bm.source === 'local' ? 0.95 : 0.65,
-                        }}
-                      >
-                        {bm.source === 'local' ? <PinIcon /> : <CloudIcon />}
-                      </span>
                       {bm.country ? `${bm.name} (${bm.country})` : bm.name}
                     </span>
                     <span

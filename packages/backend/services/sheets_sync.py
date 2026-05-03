@@ -35,7 +35,7 @@ from typing import Iterable
 import httpx
 
 from models.schemas import Bookmark, BookmarkCategory, BookmarkStore
-from services.bookmarks import GROUP_ORDER, NAME_TO_ID, _now_iso
+from services.bookmarks import _now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,8 @@ _CSV_URL_TMPL = (
 # Recognized columns in the Sheet. Everything else is ignored. Order in the
 # Sheet doesn't matter — DictReader uses the header row.
 _REQUIRED_COLS = {"name", "lat", "lng"}
-_CATEGORY_NAMES = {name for _, name in GROUP_ORDER}
+# Fallback category for rows whose `category` column is blank.
+_DEFAULT_CATEGORY_NAME = "未分類"
 
 
 def _coord_key(lat: float, lng: float) -> str:
@@ -140,10 +141,17 @@ class SheetsSyncService:
     def merge_into(self, store: BookmarkStore, rows: list[dict[str, str]]) -> SyncResult:
         """Apply the cloud-source-of-truth merge rules in-place on `store`.
         Returns a SyncResult summary; caller is responsible for persisting."""
+        # Categories are dynamic — discover them from the rows themselves and
+        # auto-create any that the local store doesn't know about yet, in the
+        # order they first appear in the sheet. This keeps the local category
+        # list aligned with the cloud without any hardcoded whitelist.
+        self._ensure_categories(store, rows)
+        cat_id_by_name = {c.name: c.id for c in store.categories}
+
         skipped: list[str] = []
         cloud_records: list[Bookmark] = []
         for i, raw in enumerate(rows, start=2):  # row 2 = first data row in Sheets
-            parsed = self._parse_row(raw, i, skipped)
+            parsed = self._parse_row(raw, i, skipped, cat_id_by_name)
             if parsed is not None:
                 cloud_records.append(parsed)
 
@@ -212,10 +220,38 @@ class SheetsSyncService:
             skipped_rows=skipped,
         )
 
-    def _parse_row(self, raw: dict[str, str], row_num: int, skipped: list[str]) -> Bookmark | None:
+    def _ensure_categories(self, store: BookmarkStore, rows: list[dict[str, str]]) -> None:
+        """Add any category names from `rows` that the store doesn't have yet.
+        Preserves first-seen order, which gives the UI a deterministic group
+        ordering matching the sheet."""
+        existing_names = {c.name for c in store.categories}
+        seen_in_rows: list[str] = []
+        for raw in rows:
+            name = (raw.get("category") or "").strip() or _DEFAULT_CATEGORY_NAME
+            if name not in existing_names and name not in seen_in_rows:
+                seen_in_rows.append(name)
+        for name in seen_in_rows:
+            store.categories.append(BookmarkCategory(
+                id=str(uuid.uuid4()),
+                name=name,
+                color="#6c8cff",
+                sort_order=len(store.categories),
+                created_at=_now_iso(),
+            ))
+
+    def _parse_row(
+        self,
+        raw: dict[str, str],
+        row_num: int,
+        skipped: list[str],
+        cat_id_by_name: dict[str, str],
+    ) -> Bookmark | None:
         """Validate one CSV row → Bookmark, or append a reason to `skipped`
         and return None. We deliberately tolerate malformed rows and keep
-        going so one bad row can't kill an otherwise-good sync."""
+        going so one bad row can't kill an otherwise-good sync.
+
+        `cat_id_by_name` is the post-_ensure_categories lookup table the
+        caller built; passing it in avoids re-scanning the store per row."""
         name = (raw.get("name") or "").strip()
         if not name:
             # An entirely blank row at the bottom of a Sheet is common and
@@ -233,13 +269,12 @@ class SheetsSyncService:
             skipped.append(f"row {row_num} ({name}): coord out of range")
             return None
 
-        category_name = (raw.get("category") or "").strip() or "未分類"
-        if category_name not in _CATEGORY_NAMES:
-            skipped.append(
-                f"row {row_num} ({name}): unknown category '{category_name}' → fell back to 未分類"
-            )
-            category_name = "未分類"
-        category_id = NAME_TO_ID[category_name]
+        category_name = (raw.get("category") or "").strip() or _DEFAULT_CATEGORY_NAME
+        category_id = cat_id_by_name.get(category_name)
+        if category_id is None:
+            # Defensive: _ensure_categories should have populated this; if not,
+            # land the bookmark in the default bucket rather than raising.
+            category_id = cat_id_by_name.get(_DEFAULT_CATEGORY_NAME, "default")
 
         now_iso = _now_iso()
         return Bookmark(

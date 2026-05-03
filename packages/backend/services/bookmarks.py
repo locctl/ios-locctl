@@ -19,13 +19,12 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Only the fallback "未分類" is hardcoded — every other category is created
+# dynamically from whatever the cloud Sheet contains. We keep the default
+# present so empty installs and locally-added bookmarks always have at least
+# one category to land in before any sync runs.
 GROUP_ORDER = [
-    ("default", "未分類"),                # was 預設
-    ("mushroom_spots", "蘑菇點"),         # new (Phase A)
-    ("postcards_flower", "明信片花點"),
-    ("postcards_mushroom", "明信片菇點"),
-    ("decorations_pure", "裝飾純點"),
-    # 「隱藏明信片」(postcards_hidden) merged into 明信片菇點 in migration
+    ("default", "未分類"),
 ]
 
 NAME_TO_ID = {name: cat_id for cat_id, name in GROUP_ORDER}

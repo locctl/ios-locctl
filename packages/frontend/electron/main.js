@@ -5,8 +5,38 @@ const os = require('os')
 const { spawn } = require('child_process')
 const http = require('http')
 
-// Strip the default menubar — ios-locctl has its own in-window controls.
-Menu.setApplicationMenu(null)
+// macOS needs an application menu for cmd+A / cmd+C / cmd+V / cmd+X / undo /
+// redo to reach inputs — without it the standard text-editing shortcuts go
+// nowhere. Keep it minimal: the in-window controls cover File/View/Window
+// territory, we only need the App + Edit menus.
+Menu.setApplicationMenu(Menu.buildFromTemplate([
+  {
+    label: 'ios-locctl',
+    submenu: [
+      { role: 'about' },
+      { type: 'separator' },
+      { role: 'hide' },
+      { role: 'hideOthers' },
+      { role: 'unhide' },
+      { type: 'separator' },
+      { role: 'quit' },
+    ],
+  },
+  {
+    label: 'Edit',
+    submenu: [
+      { role: 'undo' },
+      { role: 'redo' },
+      { type: 'separator' },
+      { role: 'cut' },
+      { role: 'copy' },
+      { role: 'paste' },
+      { role: 'pasteAndMatchStyle' },
+      { role: 'delete' },
+      { role: 'selectAll' },
+    ],
+  },
+]))
 
 let mainWindow
 let backendProc = null
