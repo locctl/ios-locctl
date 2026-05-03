@@ -247,7 +247,7 @@ async def lifespan(application: FastAPI):
 
 # ── FastAPI app ───────────────────────────────────────────
 
-app = FastAPI(title="ios-locctl", version="1.0.0", description="iOS Location Simulator", lifespan=lifespan)
+app = FastAPI(title="ios-locctl", version="0.1.0", description="iOS Location Simulator", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -279,7 +279,7 @@ app.include_router(ws_router)
 async def root():
     return {
         "name": "ios-locctl",
-        "version": "1.0.0",
+        "version": "0.1.0",
         "status": "running",
         "initial_position": app_state.get_initial_position(),
     }
