@@ -27,6 +27,7 @@ interface MapViewProps {
   destination: Position | null;
   selectedTarget?: Position | null;
   recenterToCurrentSignal?: number;
+  panToTarget?: { lat: number; lng: number; signal: number } | null;
   waypoints: Waypoint[];
   routePath: Position[];
   randomWalkRadius: number | null;
@@ -48,6 +49,7 @@ const MapView: React.FC<MapViewProps> = ({
   destination,
   selectedTarget,
   recenterToCurrentSignal = 0,
+  panToTarget = null,
   waypoints,
   routePath,
   randomWalkRadius,
@@ -323,6 +325,15 @@ const MapView: React.FC<MapViewProps> = ({
       animate: true,
     });
   }, [recenterToCurrentSignal, currentPosition]);
+
+  useEffect(() => {
+    if (!panToTarget) return;
+    const map = mapRef.current;
+    if (!map) return;
+    map.setView([panToTarget.lat, panToTarget.lng], Math.max(map.getZoom(), 14), {
+      animate: true,
+    });
+  }, [panToTarget]);
 
   // Update waypoint markers
   const waypointSigRef = useRef<string>('');

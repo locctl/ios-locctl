@@ -175,6 +175,7 @@ export const STRINGS = {
   'joy.southwest': { zh: '西南', en: 'SW' },
 
   // ── Toast / errors ───────────────────────────
+  'toast.route_loaded': { zh: '已載入路線「{name}」({n} 點),已切到多點導航,按開始執行', en: 'Loaded route "{name}" ({n} pts), switched to MultiStop — press Start to run' },
   'toast.route_saved': { zh: '已儲存路線「{name}」', en: 'Route "{name}" saved' },
   'toast.route_save_failed': { zh: '儲存失敗: {msg}', en: 'Save failed: {msg}' },
   'toast.route_need_waypoint': { zh: '請先加入至少一個路徑點', en: 'Add at least one waypoint first' },
@@ -183,6 +184,7 @@ export const STRINGS = {
   'toast.route_rename_failed': { zh: '重新命名失敗', en: 'Rename failed' },
   'toast.gpx_imported': { zh: '已匯入 {n} 個路徑點', en: 'Imported {n} waypoints' },
   'toast.gpx_import_failed': { zh: '匯入失敗: {msg}', en: 'Import failed: {msg}' },
+  'toast.gpx_export_failed': { zh: 'GPX 匯出失敗: {msg}', en: 'GPX export failed: {msg}' },
   'toast.position_restored': { zh: '已恢復到上次位置 ({lat}, {lng})', en: 'Restored to last position ({lat}, {lng})' },
 
   // ── Error codes (backend → i18n) ────────────

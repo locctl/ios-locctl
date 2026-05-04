@@ -18,6 +18,7 @@ import BookmarkDialog, { type BookmarkDialogValue } from './components/BookmarkD
 import SetupWizard, { isSetupCompleted, resetSetup } from './components/SetupWizard'
 import UsageModal from './components/UsageModal'
 import NicknameModal from './components/NicknameModal'
+import UpdateModal from './components/UpdateModal'
 import { useNickname } from './hooks/useNickname'
 import { useAppUpdate } from './hooks/useAppUpdate'
 import pkg from '../package.json'
@@ -51,6 +52,7 @@ const App: React.FC = () => {
   const [loopRouteMode, setLoopRouteMode] = useState(false)
   const [selectedTarget, setSelectedTarget] = useState<{ lat: number; lng: number; label?: string; source?: string } | null>(null)
   const [recenterToCurrentSignal, setRecenterToCurrentSignal] = useState(0)
+  const [panToTarget, setPanToTarget] = useState<{ lat: number; lng: number; signal: number } | null>(null)
   const [bookmarkDialog, setBookmarkDialog] = useState<{
     mode: 'create' | 'edit'
     id?: string
@@ -61,9 +63,27 @@ const App: React.FC = () => {
   const nickname = useNickname()
   const [showNicknameEdit, setShowNicknameEdit] = useState(false)
   const appUpdate = useAppUpdate((pkg as { version: string }).version)
+  const [updateDismissed, setUpdateDismissed] = useState(false)
   // First-launch prompt: required and unsdismissable until set. Only fires
   // once the setup wizard is out of the way so we don't stack two modals.
   const showNicknameRequired = !showSetup && !nickname.isSet
+  // Update prompt: show once per version. localStorage holds the last-dismissed
+  // version so users aren't nagged after they've already seen the popup for it.
+  const dismissedVersion = typeof window !== 'undefined'
+    ? window.localStorage.getItem('update.dismissed_version')
+    : null
+  const showUpdateModal =
+    !!appUpdate &&
+    !showSetup &&
+    !showNicknameRequired &&
+    !updateDismissed &&
+    appUpdate.latest !== dismissedVersion
+  const dismissUpdate = useCallback(() => {
+    if (appUpdate) {
+      try { window.localStorage.setItem('update.dismissed_version', appUpdate.latest) } catch {}
+    }
+    setUpdateDismissed(true)
+  }, [appUpdate])
 
   const showToast = useCallback((msg: string, ms = 2000) => {
     setToastMsg(msg)
@@ -379,9 +399,13 @@ const App: React.FC = () => {
 
   const handleRouteLoad = useCallback((id: string) => {
     const route = savedRoutes.find((r) => r.id === id)
-    if (!route || !Array.isArray(route.waypoints)) return
-    sim.setWaypoints(route.waypoints.map((w: any) => ({ lat: w.lat, lng: w.lng })))
-  }, [savedRoutes, sim])
+    if (!route || !Array.isArray(route.waypoints) || route.waypoints.length === 0) return
+    const wps = route.waypoints.map((w: any) => ({ lat: w.lat, lng: w.lng }))
+    sim.setWaypoints(wps)
+    sim.setMode(SimMode.MultiStop)
+    setPanToTarget({ lat: wps[0].lat, lng: wps[0].lng, signal: Date.now() })
+    showToast(t('toast.route_loaded', { name: route.name, n: wps.length }))
+  }, [savedRoutes, sim, showToast, t])
 
   const handleRouteSave = useCallback(async (name: string) => {
     if (sim.waypoints.length === 0) {
@@ -409,10 +433,25 @@ const App: React.FC = () => {
     }
   }, [showToast])
 
-  const handleGpxExport = useCallback((id: string) => {
-    const url = api.exportGpxUrl(id)
-    window.open(url, '_blank')
-  }, [])
+  const handleGpxExport = useCallback(async (id: string) => {
+    const route = savedRoutes.find((r) => r.id === id)
+    const filename = route ? `${route.name}.gpx` : 'route.gpx'
+    try {
+      const res = await fetch(api.exportGpxUrl(id))
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const blob = await res.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
+    } catch (err: any) {
+      showToast(t('toast.gpx_export_failed', { msg: err?.message || '' }))
+    }
+  }, [savedRoutes, showToast, t])
 
   const handleRouteShareCopy = useCallback(async (id: string) => {
     const route = savedRoutes.find((r) => r.id === id)
@@ -858,6 +897,7 @@ const App: React.FC = () => {
           destination={selectedTarget ?? destPos}
           selectedTarget={selectedTarget}
           recenterToCurrentSignal={recenterToCurrentSignal}
+          panToTarget={panToTarget}
           waypoints={sim.waypoints.map((w, i) => ({ ...w, index: i }))}
           routePath={sim.status?.running ? (sim.activeRoutePath.length > 0 ? sim.activeRoutePath : waypointPreviewPath) : waypointPreviewPath}
           randomWalkRadius={sim.mode === SimMode.RandomWalk ? randomWalkRadius : null}
@@ -969,6 +1009,15 @@ const App: React.FC = () => {
         onSave={(n) => { nickname.set(n); setShowNicknameEdit(false) }}
         onCancel={() => setShowNicknameEdit(false)}
       />
+      {appUpdate && (
+        <UpdateModal
+          open={showUpdateModal}
+          latest={appUpdate.latest}
+          current={appUpdate.current}
+          downloadUrl={appUpdate.download_url}
+          onDismiss={dismissUpdate}
+        />
+      )}
     </div>
   )
 }
