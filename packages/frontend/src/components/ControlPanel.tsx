@@ -91,6 +91,7 @@ interface ControlPanelProps {
   // Phase B1 + B2 — Sheets sync passthrough
   bookmarkSyncStatus?: import('../services/api').SyncStatus | null;
   bookmarkSyncing?: boolean;
+  bookmarkHasCloudUpdates?: boolean;
   onBookmarkSync?: () => Promise<void>;
   onBookmarkSetSyncConfig?: (patch: { sheet_url_or_id?: string; tab_name?: string; webhook_url?: string }) => Promise<void>;
   onBookmarkUploadLocal?: () => Promise<import('../services/api').UploadResult>;
@@ -101,6 +102,8 @@ interface ControlPanelProps {
   onRouteDelete?: (id: string) => void;
   onRouteGpxImport?: (file: File) => Promise<void>;
   onRouteGpxExport?: (id: string) => void;
+  onRouteShareCopy?: (id: string) => Promise<void>;
+  onRoutePasteImport?: (code: string) => Promise<void>;
   randomWalkRadius: number;
   pauseRandomWalk?: { enabled: boolean; min: number; max: number };
   onPauseRandomWalkChange?: (v: { enabled: boolean; min: number; max: number }) => void;
@@ -204,6 +207,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   bookmarkExportUrl,
   bookmarkSyncStatus,
   bookmarkSyncing,
+  bookmarkHasCloudUpdates,
   onBookmarkSync,
   onBookmarkSetSyncConfig,
   onBookmarkUploadLocal,
@@ -214,6 +218,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onRouteDelete,
   onRouteGpxImport,
   onRouteGpxExport,
+  onRouteShareCopy,
+  onRoutePasteImport,
   randomWalkRadius,
   pauseRandomWalk,
   onPauseRandomWalkChange,
@@ -237,6 +243,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   const [routeName, setRouteName] = useState('');
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [editingRouteName, setEditingRouteName] = useState('');
+  const [showRoutePaste, setShowRoutePaste] = useState(false);
+  const [routePasteValue, setRoutePasteValue] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [libraryTab, setLibraryTab] = useState<'bookmarks' | 'routes'>('bookmarks');
   const [libraryPos, setLibraryPos] = useState<{ x: number; y: number }>(() => ({
@@ -670,6 +678,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   exportUrl={bookmarkExportUrl}
                   syncStatus={bookmarkSyncStatus}
                   syncing={bookmarkSyncing}
+                  hasCloudUpdates={bookmarkHasCloudUpdates}
                   onSync={onBookmarkSync}
                   onSetSyncConfig={onBookmarkSetSyncConfig}
                   onUploadLocal={onBookmarkUploadLocal}
@@ -699,32 +708,51 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                       }}
                     >{t('generic.save')}</button>
                   </div>
-                  {onRouteGpxImport && (
-                    <div style={{ marginBottom: 10 }}>
-                      <label
-                        className="action-btn"
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 4,
-                          padding: '4px 10px', fontSize: 11, cursor: 'pointer',
-                        }}
-                      >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-                          <polyline points="17 8 12 3 7 8" />
-                          <line x1="12" y1="3" x2="12" y2="15" />
-                        </svg>
-                        {t('panel.route_gpx_import')}
-                        <input
-                          type="file"
-                          accept=".gpx,application/gpx+xml"
-                          style={{ display: 'none' }}
-                          onChange={async (e) => {
-                            const f = e.target.files?.[0];
-                            if (f) await onRouteGpxImport(f);
-                            e.target.value = '';
+                  {(onRouteGpxImport || onRoutePasteImport) && (
+                    <div style={{ marginBottom: 10, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {onRouteGpxImport && (
+                        <label
+                          className="action-btn"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            padding: '4px 10px', fontSize: 11, cursor: 'pointer',
                           }}
-                        />
-                      </label>
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                            <polyline points="17 8 12 3 7 8" />
+                            <line x1="12" y1="3" x2="12" y2="15" />
+                          </svg>
+                          {t('panel.route_gpx_import')}
+                          <input
+                            type="file"
+                            accept=".gpx,application/gpx+xml"
+                            style={{ display: 'none' }}
+                            onChange={async (e) => {
+                              const f = e.target.files?.[0];
+                              if (f) await onRouteGpxImport(f);
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
+                      )}
+                      {onRoutePasteImport && (
+                        <button
+                          className="action-btn"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            padding: '4px 10px', fontSize: 11, cursor: 'pointer',
+                          }}
+                          onClick={() => { setRoutePasteValue(''); setShowRoutePaste(true); }}
+                          title="貼上朋友傳的路線分享碼"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" />
+                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                          </svg>
+                          貼上分享碼
+                        </button>
+                      )}
                     </div>
                   )}
                   {savedRoutes.length === 0 && (
@@ -788,6 +816,19 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                             </svg>
                           </button>
                         )}
+                        {onRouteShareCopy && (
+                          <button
+                            className="action-btn"
+                            title="複製路線分享碼,可貼給朋友"
+                            onClick={(e) => { e.stopPropagation(); onRouteShareCopy(route.id); }}
+                            style={{ padding: '2px 6px', fontSize: 10 }}
+                          >
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <rect x="9" y="9" width="13" height="13" rx="2" />
+                              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                            </svg>
+                          </button>
+                        )}
                         {onRouteGpxExport && (
                           <button
                             className="action-btn"
@@ -840,6 +881,51 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         <span style={{ opacity: 0.6 }}>·</span>
         <span style={{ opacity: 0.7 }}>by Mars</span>
       </div>
+
+      {showRoutePaste && onRoutePasteImport && createPortal(
+        <div
+          onClick={() => setShowRoutePaste(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(8, 10, 20, 0.6)',
+            backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
+            zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'rgba(26, 29, 39, 0.97)',
+              border: '1px solid rgba(108, 140, 255, 0.3)',
+              borderRadius: 10, padding: '20px 22px', width: 460, color: '#e0e0e0',
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>貼上路線分享碼</div>
+            <p style={{ fontSize: 12, opacity: 0.65, lineHeight: 1.6, margin: '0 0 10px' }}>
+              朋友傳來的字串以 <code>ios-locctl-route:</code> 開頭。整段貼進來。
+            </p>
+            <textarea
+              className="search-input"
+              autoFocus
+              value={routePasteValue}
+              onChange={(e) => setRoutePasteValue(e.target.value)}
+              placeholder="ios-locctl-route:..."
+              style={{ width: '100%', minHeight: 110, fontSize: 11, fontFamily: 'monospace', resize: 'vertical', marginBottom: 12 }}
+            />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="action-btn" onClick={() => setShowRoutePaste(false)}>取消</button>
+              <button
+                className="action-btn primary"
+                disabled={!routePasteValue.trim()}
+                onClick={async () => {
+                  await onRoutePasteImport(routePasteValue.trim());
+                  setShowRoutePaste(false);
+                }}
+              >匯入</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 };

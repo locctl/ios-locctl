@@ -36,6 +36,7 @@ interface BookmarkListProps {
   // Phase B1 + B2 — Sheets sync
   syncStatus?: SyncStatus | null;
   syncing?: boolean;
+  hasCloudUpdates?: boolean;
   onSync?: () => Promise<void>;
   onSetSyncConfig?: (patch: { sheet_url_or_id?: string; tab_name?: string; webhook_url?: string }) => Promise<void>;
   onUploadLocal?: () => Promise<import('../services/api').UploadResult>;
@@ -74,6 +75,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   exportUrl,
   syncStatus,
   syncing,
+  hasCloudUpdates,
   onSync,
   onSetSyncConfig,
   onUploadLocal,
@@ -124,6 +126,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
         <BookmarkSyncBar
           status={syncStatus ?? null}
           syncing={!!syncing}
+          hasCloudUpdates={!!hasCloudUpdates}
           onSync={onSync}
           onSetConfig={onSetSyncConfig}
           onUpload={onUploadLocal}
@@ -438,7 +441,10 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                         </svg>
                       </button>
                     )}
-                    {bm.id && (
+                    {bm.id && bm.source !== 'cloud' && (
+                      // Cloud bookmarks are owned by the shared Sheet — by
+                      // design the desktop app can't delete them; users have
+                      // to remove the row in Google Sheets directly.
                       <button
                         type="button"
                         onClick={(e) => {

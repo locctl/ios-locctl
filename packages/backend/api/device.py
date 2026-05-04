@@ -213,20 +213,15 @@ async def device_info(udid: str):
 
 @router.post("/trigger-dev-mode-toggle")
 async def trigger_dev_mode_toggle():
-    """Make a single dev-service call against the connected USB device so
-    iOS surfaces the Developer Mode toggle in
-    Settings → Privacy & Security. Without this trigger, the toggle is
-    hidden by default on devices that have never been touched by Xcode
-    or any pymobiledevice3 dev tool.
+    """Make iOS surface the Developer Mode toggle in
+    Settings → Privacy & Security. Without this call, the toggle stays
+    hidden on devices that have never been touched by Xcode or any
+    pymobiledevice3 dev tool.
 
-    Implementation: query MobileImageMounterService for whether a
-    Personalized image is mounted. The query itself is harmless when DDI
-    isn't available — what matters to iOS is that we *talked to* the
-    image mount service, which is enough to flip the AMFI bit that
-    enables the Settings toggle.
-
-    Returns ok regardless of whether DDI was present; failure to reach
-    the device at all surfaces as an HTTP 400.
+    Uses AmfiService.reveal_developer_mode_option_in_ui() — the official
+    pymobiledevice3 API for exactly this case (sends a DEVELOPER_MODE_REVEAL
+    plist that creates an empty file at AMFIShowOverridePath, which iOS
+    reads to decide whether to render the toggle).
     """
     from pymobiledevice3.lockdown import create_using_usbmux
     from pymobiledevice3.usbmux import list_devices as mux_list_devices
@@ -254,7 +249,7 @@ async def trigger_dev_mode_toggle():
         )
 
     udid = usb_dev.serial
-    logger.info("dev-mode trigger requested for %s", udid)
+    logger.info("dev-mode toggle reveal requested for %s", udid)
 
     try:
         lockdown = await create_using_usbmux(serial=udid, autopair=True)
@@ -268,28 +263,21 @@ async def trigger_dev_mode_toggle():
             },
         )
 
-    triggered = False
     try:
-        from pymobiledevice3.services.mobile_image_mounter import MobileImageMounterService
-        mounter = MobileImageMounterService(lockdown=lockdown)
-        try:
-            await mounter.connect()
-            # Query is enough — even if it raises, the dev service was contacted
-            try:
-                await mounter.is_image_mounted("Personalized")
-            except Exception:
-                pass
-            triggered = True
-        finally:
-            try:
-                await mounter.close()
-            except Exception:
-                pass
-    except Exception:
-        logger.warning("MobileImageMounter trigger raised", exc_info=True)
+        from pymobiledevice3.services.amfi import AmfiService
+        amfi = AmfiService(lockdown)
+        await amfi.reveal_developer_mode_option_in_ui()
+    except Exception as exc:
+        logger.exception("reveal_developer_mode_option_in_ui failed for %s", udid)
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "reveal_failed",
+                    "message": f"無法準備 Developer Mode 選項: {exc}",
+                    "udid": udid},
+        )
 
     return {
-        "status": "triggered" if triggered else "best_effort",
+        "status": "revealed",
         "udid": udid,
         "next_step": (
             "請到手機 設定 → 隱私權與安全性 → 開發者模式 開啟 toggle，"
@@ -341,16 +329,19 @@ async def enable_dev_mode():
 
     try:
         from pymobiledevice3.services.amfi import AmfiService
-        # AmfiService import path may vary slightly across pymobiledevice3 versions;
-        # if older versions expose DeviceHasPasscodeSetError on a different path,
-        # we still catch it via the str(e) check below.
         try:
             from pymobiledevice3.services.amfi import DeviceHasPasscodeSetError  # type: ignore
         except ImportError:
             DeviceHasPasscodeSetError = None  # type: ignore
 
         amfi = AmfiService(lockdown)
-        await amfi.enable_developer_mode()
+        # enable_post_restart=False: send only the initial prompt and return
+        # immediately. The default (True) blocks until the device finishes
+        # rebooting and answers a second post-restart prompt server-side,
+        # which makes the wizard feel hung from the user's perspective.
+        # The UI flow expects the user to tap "Turn On" on the iPhone
+        # themselves and then click 我已重開 once the phone is back.
+        await amfi.enable_developer_mode(enable_post_restart=False)
         return {
             "status": "enabled",
             "udid": udid,

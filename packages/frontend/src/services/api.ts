@@ -191,7 +191,8 @@ export const syncBookmarks = () =>
 
 export interface UploadResult {
   status: 'ok' | 'noop'
-  uploaded: number
+  added: number
+  updated: number
   skipped: number
   flipped_to_cloud: number
   skipped_items?: Array<{ name: string; reason: string }>
@@ -199,6 +200,16 @@ export interface UploadResult {
 }
 export const uploadLocalBookmarks = () =>
   request<UploadResult>('POST', '/api/bookmarks/upload')
+
+export interface SyncCheckResult {
+  configured: boolean
+  cloud_count: number
+  local_cloud_count: number
+  has_updates: boolean
+  error?: string
+}
+export const checkSyncDiff = () =>
+  request<SyncCheckResult>('GET', '/api/bookmarks/sync/check')
 
 export const openLog = () => request<{ status: string; path: string }>('POST', '/api/system/open-log')
 export const openLogFolder = () => request<{ status: string; path: string }>('POST', '/api/system/open-log-folder')

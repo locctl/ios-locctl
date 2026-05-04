@@ -19,6 +19,8 @@ import SetupWizard, { isSetupCompleted, resetSetup } from './components/SetupWiz
 import UsageModal from './components/UsageModal'
 import NicknameModal from './components/NicknameModal'
 import { useNickname } from './hooks/useNickname'
+import { useAppUpdate } from './hooks/useAppUpdate'
+import pkg from '../package.json'
 
 import { SimMode, MoveMode } from './hooks/useSimulation'
 
@@ -58,6 +60,7 @@ const App: React.FC = () => {
   const [showUsage, setShowUsage] = useState(false)
   const nickname = useNickname()
   const [showNicknameEdit, setShowNicknameEdit] = useState(false)
+  const appUpdate = useAppUpdate((pkg as { version: string }).version)
   // First-launch prompt: required and unsdismissable until set. Only fires
   // once the setup wizard is out of the way so we don't stack two modals.
   const showNicknameRequired = !showSetup && !nickname.isSet
@@ -411,6 +414,32 @@ const App: React.FC = () => {
     window.open(url, '_blank')
   }, [])
 
+  const handleRouteShareCopy = useCallback(async (id: string) => {
+    const route = savedRoutes.find((r) => r.id === id)
+    if (!route) return
+    try {
+      const { encodeRoute } = await import('./utils/routeShare')
+      const code = encodeRoute({ name: route.name, waypoints: route.waypoints || [] })
+      await navigator.clipboard.writeText(code)
+      showToast(`✓ 已複製 ${route.name} 的分享碼`)
+    } catch (err: any) {
+      showToast(`複製失敗: ${err?.message || 'unknown'}`)
+    }
+  }, [savedRoutes, showToast])
+
+  const handleRoutePasteImport = useCallback(async (code: string) => {
+    try {
+      const { decodeRoute } = await import('./utils/routeShare')
+      const r = decodeRoute(code)
+      await api.saveRoute({ name: r.name, waypoints: r.waypoints, profile: 'walking' })
+      const routes = await api.getSavedRoutes()
+      setSavedRoutes(routes)
+      showToast(`✓ 已匯入路線 ${r.name} (${r.waypoints.length} pts)`)
+    } catch (err: any) {
+      showToast(`匯入失敗: ${err?.message || 'unknown'}`)
+    }
+  }, [showToast])
+
   const handleApplySpeed = useCallback(async () => {
     try {
       await sim.applySpeed()
@@ -587,12 +616,15 @@ const App: React.FC = () => {
           bookmarkExportUrl={api.bookmarksExportUrl()}
           bookmarkSyncStatus={bm.syncStatus}
           bookmarkSyncing={bm.syncing}
+          bookmarkHasCloudUpdates={bm.hasCloudUpdates}
           onBookmarkSync={bm.syncFromSheets}
           onBookmarkSetSyncConfig={bm.setSheetConfig}
           onBookmarkUploadLocal={bm.uploadLocal}
           savedRoutes={savedRoutes.map(r => ({ id: r.id, name: r.name, waypoints: r.waypoints ?? [] }))}
           onRouteGpxImport={handleGpxImport}
           onRouteGpxExport={handleGpxExport}
+          onRouteShareCopy={handleRouteShareCopy}
+          onRoutePasteImport={handleRoutePasteImport}
           onRouteRename={handleRouteRename}
           onRouteDelete={handleRouteDelete}
           onRouteLoad={handleRouteLoad}
@@ -896,6 +928,7 @@ const App: React.FC = () => {
           onResetSetup={handleResetSetup}
           nickname={nickname.name}
           onEditNickname={() => setShowNicknameEdit(true)}
+          appUpdate={appUpdate}
         />
 
         {toastMsg && (

@@ -130,6 +130,22 @@ async def update_bookmark(bookmark_id: str, bookmark: Bookmark):
 @router.delete("/{bookmark_id}")
 async def delete_bookmark(bookmark_id: str):
     bm = _bm()
+    # Look up first so we can refuse cloud deletions before mutating anything.
+    target = next((b for b in bm.list_bookmarks() if b.id == bookmark_id), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Bookmark not found")
+    if target.source == "cloud":
+        # Cloud rows live in the shared Sheet — by design the desktop app
+        # can only add or edit them, not delete. Removing them has to happen
+        # in Google Sheets directly so all collaborators see the change
+        # through the same audit trail.
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "cloud_delete_forbidden",
+                "message": "雲端共編書籤無法從 app 刪除,請到 Google Sheets 刪除該 row。",
+            },
+        )
     if not bm.delete_bookmark(bookmark_id):
         raise HTTPException(status_code=404, detail="Bookmark not found")
     return {"status": "deleted"}
@@ -247,7 +263,11 @@ async def import_bookmarks_csv(data: dict):
     if not rows:
         return {"imported": 0, "skipped": 0, "errors": []}
 
-    # Index existing by coord key
+    # Reuse sheets_sync's category discovery so categories invented by the
+    # CSV file get auto-created in the same way as a Sheets sync would.
+    svc._ensure_categories(bm.store, rows)
+    cat_id_by_name = {c.name: c.id for c in bm.store.categories}
+
     from services.sheets_sync import _coord_key
     existing_keys = {_coord_key(b.lat, b.lng) for b in bm.list_bookmarks()}
 
@@ -255,13 +275,12 @@ async def import_bookmarks_csv(data: dict):
     imported = 0
     skipped_dup = 0
     for i, raw in enumerate(rows, start=2):
-        parsed = svc._parse_row(raw, i, skipped_reasons)
+        parsed = svc._parse_row(raw, i, skipped_reasons, cat_id_by_name)
         if parsed is None:
             continue
         if _coord_key(parsed.lat, parsed.lng) in existing_keys:
             skipped_dup += 1
             continue
-        # Imported records belong to the user — flag them as local-pending.
         parsed.source = "local"
         bm.store.bookmarks.append(parsed)
         existing_keys.add(_coord_key(parsed.lat, parsed.lng))
@@ -336,6 +355,50 @@ async def set_sync_config(req: SheetsConfigRequest):
         "sheet_id": cfg.get("sheet_id", ""),
         "tab_name": cfg.get("tab_name", "bookmarks"),
         "webhook_url": cfg.get("webhook_url", ""),
+    }
+
+
+@router.get("/sync/check")
+async def check_sync_diff():
+    """Cheap "is there anything new on the cloud?" probe.
+
+    Hits the same CSV endpoint as `/sync` but only counts rows; no merge,
+    no persist. Returns the cloud row count alongside the local cloud-tagged
+    bookmark count so the UI can decide whether to show a "(有新更新)"
+    badge on the download button without forcing the user to actually sync.
+
+    Failures are not fatal — a network blip just collapses to "no diff
+    visible" so the badge stays hidden.
+    """
+    cfg = _load_sheets_config()
+    sheet_id = cfg.get("sheet_id")
+    bm = _bm()
+    local_cloud_count = sum(1 for b in bm.list_bookmarks() if b.source == "cloud")
+
+    if not sheet_id:
+        return {"configured": False, "cloud_count": 0, "local_cloud_count": local_cloud_count, "has_updates": False}
+
+    svc = SheetsSyncService(sheet_id=sheet_id, tab_name=cfg.get("tab_name", "bookmarks"))
+    try:
+        rows = await svc.fetch_rows()
+    except SheetsSyncError as e:
+        logger.info("sync check failed quietly: %s", e)
+        return {
+            "configured": True, "cloud_count": 0,
+            "local_cloud_count": local_cloud_count, "has_updates": False,
+            "error": str(e),
+        }
+
+    cloud_count = sum(
+        1 for r in rows if (r.get("name") or "").strip()
+        and (r.get("lat") or "").strip()
+        and (r.get("lng") or "").strip()
+    )
+    return {
+        "configured": True,
+        "cloud_count": cloud_count,
+        "local_cloud_count": local_cloud_count,
+        "has_updates": cloud_count != local_cloud_count,
     }
 
 
@@ -418,11 +481,14 @@ async def sync_from_sheets():
 @router.post("/upload")
 async def upload_local_bookmarks():
     """POST every source="local" bookmark to the user's Apps Script webhook.
-    On the script's "added" / "skipped" reply, mark successfully-uploaded
-    records source="cloud" so they don't get re-sent next time.
 
-    Returns a structured summary the UI shows in a toast — added vs.
-    skipped (typically duplicates the script noticed before insert)."""
+    The webhook does an upsert: existing rows (matched by lat,lng to 6
+    decimals) get rewritten in-place, new rows are appended. That covers
+    both newly-added local bookmarks AND edits made to cloud bookmarks
+    (which also flip source back to "local" until uploaded).
+
+    Records the script confirms it added or updated have their local
+    source flipped back to "cloud" so they don't get re-sent next time."""
     import httpx
 
     cfg = _load_sheets_config()
@@ -437,11 +503,17 @@ async def upload_local_bookmarks():
     bm = _bm()
     payload = merge_unique_local_into_upload_payload(bm.store)
     if not payload:
-        return {"status": "noop", "uploaded": 0, "skipped": 0, "message": "沒有待上傳的本地書籤"}
+        return {
+            "status": "noop", "added": 0, "updated": 0, "skipped": 0,
+            "message": "沒有待上傳的本地書籤",
+        }
 
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            resp = await client.post(webhook, json=payload)
+            resp = await client.post(
+                webhook,
+                json={"action": "upsert", "items": payload},
+            )
     except httpx.HTTPError as e:
         raise HTTPException(
             status_code=502,
@@ -472,17 +544,18 @@ async def upload_local_bookmarks():
                     "message": f"webhook 錯誤: {result['error']}"},
         )
 
-    # Index uploaded coords so we know which local records to flip to cloud.
-    # Apps Script returns added_items as [{name, lat, lng}, ...].
+    # Both added and updated items are now in cloud — flip their source flag
+    # so the upload button stops showing them as pending.
     from services.sheets_sync import _coord_key
-    added_keys = {
-        _coord_key(item["lat"], item["lng"])
-        for item in (result.get("added_items") or [])
-        if "lat" in item and "lng" in item
-    }
+    synced_keys: set[str] = set()
+    for bucket in ("added_items", "updated_items"):
+        for item in (result.get(bucket) or []):
+            if "lat" in item and "lng" in item:
+                synced_keys.add(_coord_key(item["lat"], item["lng"]))
+
     flipped = 0
     for b in bm.list_bookmarks():
-        if b.source == "local" and _coord_key(b.lat, b.lng) in added_keys:
+        if b.source == "local" and _coord_key(b.lat, b.lng) in synced_keys:
             b.source = "cloud"
             flipped += 1
     if flipped:
@@ -490,7 +563,8 @@ async def upload_local_bookmarks():
 
     return {
         "status": "ok",
-        "uploaded": result.get("added", 0),
+        "added": result.get("added", 0),
+        "updated": result.get("updated", 0),
         "skipped": result.get("skipped", 0),
         "flipped_to_cloud": flipped,
         "skipped_items": result.get("skipped_items", []),

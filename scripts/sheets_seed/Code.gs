@@ -49,8 +49,22 @@ function doPost(e) {
   } catch (err) {
     return _json({ error: 'invalid JSON: ' + err.message }, 400);
   }
-  if (!Array.isArray(body)) {
-    return _json({ error: 'expected an array of bookmarks' }, 400);
+
+  // Accept either a bare array (legacy: treat as upsert) or an envelope:
+  //   { action: 'upsert', items: [...] }
+  // Delete operations are intentionally not supported — local installs can
+  // only add/edit cloud rows, never remove them; cloud deletions happen in
+  // the Sheet UI directly.
+  let items;
+  if (Array.isArray(body)) {
+    items = body;
+  } else if (body && Array.isArray(body.items)) {
+    if (body.action && body.action !== 'upsert') {
+      return _json({ error: `unsupported action: ${body.action}` }, 400);
+    }
+    items = body.items;
+  } else {
+    return _json({ error: 'expected an array of bookmarks or { action, items }' }, 400);
   }
 
   const sheet = SpreadsheetApp.getActive().getSheetByName(TAB_NAME);
@@ -58,23 +72,28 @@ function doPost(e) {
     return _json({ error: `tab "${TAB_NAME}" not found in this spreadsheet` }, 404);
   }
 
-  // Build dedup index from existing lat,lng (columns B and C, header in row 1).
+  // Build a coord-key → row index map of existing rows so we can rewrite a
+  // matching row in place instead of appending a duplicate. Without this,
+  // edits to cloud bookmarks (which keep their lat,lng) would be silently
+  // dropped as "duplicates".
   const lastRow = sheet.getLastRow();
-  const existing = new Set();
+  const existing = new Map(); // key → 1-indexed sheet row number
   if (lastRow >= 2) {
-    const range = sheet.getRange(2, 2, lastRow - 1, 2).getValues(); // B:C
-    range.forEach((r) => {
+    const range = sheet.getRange(2, 2, lastRow - 1, 2).getValues(); // B:C lat,lng
+    range.forEach((r, i) => {
       const lat = parseFloat(r[0]);
       const lng = parseFloat(r[1]);
       if (Number.isFinite(lat) && Number.isFinite(lng)) {
-        existing.add(_coordKey(lat, lng));
+        existing.set(_coordKey(lat, lng), i + 2);
       }
     });
   }
 
   const added = [];
+  const updated = [];
   const skipped = [];
-  body.forEach((b) => {
+
+  items.forEach((b) => {
     const lat = parseFloat(b.lat);
     const lng = parseFloat(b.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
@@ -82,19 +101,28 @@ function doPost(e) {
       return;
     }
     const key = _coordKey(lat, lng);
-    if (existing.has(key)) {
-      skipped.push({ name: b.name, reason: 'duplicate' });
-      return;
+    const row = COLUMNS.map((c) => {
+      if (c === 'lat') return lat;
+      if (c === 'lng') return lng;
+      return b[c] || '';
+    });
+    const existingRow = existing.get(key);
+    if (existingRow != null) {
+      sheet.getRange(existingRow, 1, 1, COLUMNS.length).setValues([row]);
+      updated.push({ name: b.name, lat, lng });
+    } else {
+      sheet.appendRow(row);
+      added.push({ name: b.name, lat, lng });
+      existing.set(key, sheet.getLastRow());
     }
-    sheet.appendRow(COLUMNS.map((c) => (c === 'lat' || c === 'lng' ? (c === 'lat' ? lat : lng) : (b[c] || ''))));
-    existing.add(key);
-    added.push({ name: b.name, lat, lng });
   });
 
   return _json({
     added: added.length,
+    updated: updated.length,
     skipped: skipped.length,
     added_items: added,
+    updated_items: updated,
     skipped_items: skipped,
   });
 }

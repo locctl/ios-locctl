@@ -31,6 +31,9 @@ export function useBookmarks() {
   // Phase B1 — Sheets sync state
   const [syncStatus, setSyncStatus] = useState<api.SyncStatus | null>(null)
   const [syncing, setSyncing] = useState(false)
+  // Cheap "is the cloud ahead of us?" probe. Updated on mount + after every
+  // sync; the SyncBar uses it to badge the download button.
+  const [hasCloudUpdates, setHasCloudUpdates] = useState(false)
   const mountedRef = useRef(true)
 
   const refresh = useCallback(async () => {
@@ -59,21 +62,33 @@ export function useBookmarks() {
     }
   }, [])
 
+  const checkCloudUpdates = useCallback(async () => {
+    try {
+      const r = await api.checkSyncDiff()
+      if (mountedRef.current) setHasCloudUpdates(r.has_updates)
+    } catch {
+      // Network blip — keep current state, the badge isn't worth a UI alert
+    }
+  }, [])
+
   // Load on mount
   useEffect(() => {
     mountedRef.current = true
     refresh()
     refreshSyncStatus()
+    checkCloudUpdates()
     return () => {
       mountedRef.current = false
     }
-  }, [refresh, refreshSyncStatus])
+  }, [refresh, refreshSyncStatus, checkCloudUpdates])
 
   const syncFromSheets = useCallback(async () => {
     setSyncing(true)
     try {
       await api.syncBookmarks()
       await Promise.all([refresh(), refreshSyncStatus()])
+      // After sync we're guaranteed to be caught up.
+      if (mountedRef.current) setHasCloudUpdates(false)
     } finally {
       if (mountedRef.current) setSyncing(false)
     }
@@ -175,6 +190,8 @@ export function useBookmarks() {
     syncFromSheets,
     setSheetConfig,
     refreshSyncStatus,
+    hasCloudUpdates,
+    checkCloudUpdates,
     // Phase B2
     uploadLocal,
   }

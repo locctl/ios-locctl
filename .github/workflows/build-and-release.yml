@@ -25,15 +25,17 @@ env:
 
 jobs:
   build:
+    # arm64 only — GitHub-hosted macos-13 (Intel) runners have very long
+    # queue times on the free tier and our user base is overwhelmingly
+    # M-series. Intel users can still run the arm64 build under Rosetta 2
+    # (Electron supports Rosetta; PyInstaller arm64 binaries don't but we
+    # only ship arm64 today). If demand for native x64 returns, add a
+    # macos-13 matrix entry — the rest of the workflow already handles
+    # multiple arches.
     strategy:
       fail-fast: false
       matrix:
-        # PyInstaller can't cross-compile, so we need one runner per arch
-        # the dmg should support. macos-13 = x64 (Intel), macos-14 = arm64
-        # (M-series). Both produce a separate .dmg the user picks at download.
         include:
-          - os: macos-13
-            arch: x64
           - os: macos-14
             arch: arm64
     runs-on: ${{ matrix.os }}

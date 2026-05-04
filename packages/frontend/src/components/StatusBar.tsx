@@ -27,6 +27,7 @@ interface StatusBarProps {
   onResetSetup?: () => void;
   nickname?: string;
   onEditNickname?: () => void;
+  appUpdate?: { latest: string; download_url: string } | null;
 }
 
 import type { StringKey } from '../i18n';
@@ -61,6 +62,7 @@ const StatusBar: React.FC<StatusBarProps> = ({
   onResetSetup,
   nickname,
   onEditNickname,
+  appUpdate,
 }) => {
   const t = useT();
   const [cooldownDisplay, setCooldownDisplay] = useState(cooldown);
@@ -311,6 +313,29 @@ const StatusBar: React.FC<StatusBarProps> = ({
         <span style={{ fontSize: 10, opacity: 0.45, fontFamily: 'monospace' }}>
           v{APP_VERSION}
         </span>
+        {appUpdate && (
+          <a
+            href={appUpdate.download_url}
+            target="_blank"
+            rel="noreferrer"
+            title={`新版 v${appUpdate.latest} 已釋出 — 點擊下載`}
+            style={{
+              marginLeft: 4,
+              padding: '0 6px',
+              borderRadius: 8,
+              background: 'linear-gradient(90deg, #ff6b6b, #ffc107)',
+              color: '#fff',
+              fontSize: 9,
+              fontWeight: 700,
+              letterSpacing: 0.3,
+              lineHeight: '14px',
+              textDecoration: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            NEW v{appUpdate.latest}
+          </a>
+        )}
         {onResetSetup && (
           <button
             onClick={() => {

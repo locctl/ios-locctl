@@ -54,6 +54,7 @@ export { CloudIcon, PinIcon }
 interface Props {
   status: SyncStatus | null
   syncing: boolean
+  hasCloudUpdates?: boolean
   onSync: () => Promise<void>
   onSetConfig: (patch: { sheet_url_or_id?: string; tab_name?: string; webhook_url?: string }) => Promise<void>
   onUpload: () => Promise<UploadResult>
@@ -68,7 +69,7 @@ interface Props {
  * The upload button is only shown when there are pending local records,
  * so a fresh "all cloud" install isn't cluttered.
  */
-const BookmarkSyncBar: React.FC<Props> = ({ status, syncing, onSync, onSetConfig, onUpload }) => {
+const BookmarkSyncBar: React.FC<Props> = ({ status, syncing, hasCloudUpdates, onSync, onSetConfig, onUpload }) => {
   const [showConfig, setShowConfig] = useState(false)
   const [sheetInput, setSheetInput] = useState('')
   const [webhookInput, setWebhookInput] = useState('')
@@ -116,8 +117,11 @@ const BookmarkSyncBar: React.FC<Props> = ({ status, syncing, onSync, onSetConfig
       if (r.status === 'noop') {
         flashMsg('沒有待上傳的本地書籤')
       } else {
-        const dup = r.skipped ? `,雲端已有 ${r.skipped}` : ''
-        flashMsg(`✓ 已上傳 ${r.uploaded} 筆到雲端${dup}`)
+        const parts: string[] = []
+        if (r.added) parts.push(`新增 ${r.added}`)
+        if (r.updated) parts.push(`更新 ${r.updated}`)
+        if (r.skipped) parts.push(`跳過 ${r.skipped}`)
+        flashMsg(`✓ 已同步到雲端: ${parts.join('、') || '無變更'}`)
       }
     } catch (e: any) {
       setSyncError(e?.message || '上傳失敗')
@@ -146,12 +150,15 @@ const BookmarkSyncBar: React.FC<Props> = ({ status, syncing, onSync, onSetConfig
       <div style={barStyle}>
         <button
           className="action-btn"
-          style={{ ...syncBtnStyle, opacity: syncing ? 0.6 : 1 }}
+          style={{ ...syncBtnStyle, opacity: syncing ? 0.6 : 1, position: 'relative' }}
           disabled={syncing}
           onClick={handleSync}
           title={status?.configured ? '從雲端 Sheets 拉最新書籤到本機' : '設定 Sheets URL 後按此下載'}
         >
           <ArrowDownIcon /> {syncing ? '下載中⋯' : '下載雲端'}
+          {hasCloudUpdates && !syncing && (
+            <span style={updateBadgeStyle} title="雲端 Sheets 有變動,按下載同步">NEW</span>
+          )}
         </button>
         {pendingLocal > 0 && (
           <button
@@ -259,6 +266,19 @@ const barStyle: React.CSSProperties = {
   borderBottom: '1px solid rgba(255,255,255,0.05)', marginBottom: 6,
 }
 const syncBtnStyle: React.CSSProperties = { padding: '3px 9px', fontSize: 11 }
+const updateBadgeStyle: React.CSSProperties = {
+  marginLeft: 6,
+  padding: '0 5px',
+  borderRadius: 8,
+  background: 'linear-gradient(90deg, #ff6b6b, #ffc107)',
+  color: '#fff',
+  fontSize: 9,
+  fontWeight: 700,
+  letterSpacing: 0.3,
+  lineHeight: '14px',
+  display: 'inline-block',
+  verticalAlign: '1px',
+}
 const uploadBtnStyle: React.CSSProperties = {
   padding: '3px 9px', fontSize: 11,
   background: 'rgba(255, 193, 7, 0.18)',
