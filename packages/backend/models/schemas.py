@@ -142,7 +142,11 @@ class SavedRoute(BaseModel):
     name: str
     waypoints: list[Coordinate]
     profile: str = "walking"
+    note: str = ""
     created_at: str = ""
+    updated_by: str = ""
+    updated_at: str = ""
+    source: str = "local"
 
 
 # ── Bookmarks ─────────────────────────────────────────────
@@ -172,9 +176,9 @@ class Bookmark(BaseModel):
     last_used_at: str = ""
     # Phase A additions:
     country: str = ""           # free-form ("日本" / "JP" / "京都")
-    added_by: str = ""          # nickname of contributor
-    added_at: str = ""          # YYYY-MM-DD
-    source: str = "local"       # "cloud" (synced from Sheets) | "local" (in-app, not yet uploaded)
+    updated_by: str = ""        # last editor nickname
+    updated_at: str = ""        # last edit timestamp
+    source: str = "local"       # "cloud" | "local" | "deleted"
     last_interacted_at: str = ""  # injected from local status store; never written to Sheets
 
 

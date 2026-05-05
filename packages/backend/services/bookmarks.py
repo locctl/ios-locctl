@@ -69,8 +69,8 @@ def _serialize_grouped(store: BookmarkStore) -> dict[str, list[dict[str, Any]]]:
                 "lat": bm.lat,
                 "lng": bm.lng,
                 "country": bm.country,
-                "added_by": bm.added_by,
-                "added_at": bm.added_at,
+                "updated_by": bm.updated_by,
+                "updated_at": bm.updated_at,
                 "source": bm.source,
                 "note": bm.note,
             }
@@ -116,8 +116,8 @@ def _load_grouped_style(data: dict[str, Any]) -> BookmarkStore:
                         created_at=_now_iso(),
                         last_used_at=_now_iso(),
                         country=str(item.get("country", "") or ""),
-                        added_by=str(item.get("added_by", "") or ""),
-                        added_at=str(item.get("added_at", "") or ""),
+                        updated_by=str(item.get("updated_by", item.get("added_by", "")) or ""),
+                        updated_at=str(item.get("updated_at", item.get("added_at", "")) or ""),
                         # Fall back to "cloud" for legacy data — pre-Phase-A
                         # bookmarks are the seed set, so they belong to the
                         # shared knowledge base by default.
@@ -260,8 +260,7 @@ class BookmarkManager:
         country: str = "",
         note: str = "",
         category_id: str = "default",
-        added_by: str = "",
-        added_at: str = "",
+        updated_by: str = "",
     ) -> Bookmark:
         """Create a new bookmark.
 
@@ -272,7 +271,6 @@ class BookmarkManager:
             category_id = "default"
 
         now = _now_iso()
-        from datetime import date
         bm = Bookmark(
             id=str(uuid.uuid4()),
             name=name,
@@ -283,8 +281,8 @@ class BookmarkManager:
             category_id=category_id,
             created_at=now,
             last_used_at=now,
-            added_by=added_by,
-            added_at=added_at or date.today().isoformat(),
+            updated_by=updated_by,
+            updated_at=now,
             source="local",
         )
         self.store.bookmarks.append(bm)
@@ -298,25 +296,43 @@ class BookmarkManager:
             return None
 
         allowed = {"name", "lat", "lng", "country", "note", "category_id",
-                   "last_used_at", "added_by", "added_at", "source"}
+                   "last_used_at", "updated_by", "updated_at", "source"}
         for key, value in kwargs.items():
             if key in allowed and value is not None:
                 setattr(bm, key, value)
+
+        if "updated_at" not in kwargs:
+            bm.updated_at = _now_iso()
 
         self._save()
         return bm
 
     def delete_bookmark(self, bm_id: str) -> bool:
-        """Delete a bookmark by ID."""
-        before = len(self.store.bookmarks)
-        self.store.bookmarks = [b for b in self.store.bookmarks if b.id != bm_id]
-        if len(self.store.bookmarks) < before:
-            self._save()
-            return True
-        return False
+        """Delete a bookmark by ID or mark it pending deletion."""
+        bm = self._find_bookmark(bm_id)
+        if bm is None:
+            return False
+        if bm.source == "local":
+            self.store.bookmarks = [b for b in self.store.bookmarks if b.id != bm_id]
+        else:
+            bm.source = "deleted"
+            bm.updated_at = _now_iso()
+        self._save()
+        return True
 
-    def list_bookmarks(self) -> list[Bookmark]:
-        return list(self.store.bookmarks)
+    def purge_bookmarks_by_coords(self, keys: set[str]) -> int:
+        from services.sheets_sync import _coord_key
+        before = len(self.store.bookmarks)
+        self.store.bookmarks = [b for b in self.store.bookmarks if _coord_key(b.lat, b.lng) not in keys]
+        removed = before - len(self.store.bookmarks)
+        if removed:
+            self._save()
+        return removed
+
+    def list_bookmarks(self, include_deleted: bool = False) -> list[Bookmark]:
+        if include_deleted:
+            return list(self.store.bookmarks)
+        return [b for b in self.store.bookmarks if b.source != "deleted"]
 
     def move_bookmarks(
         self,

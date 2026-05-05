@@ -19,6 +19,7 @@ from models.schemas import Bookmark, BookmarkCategory, BookmarkMoveRequest
 from services.sheets_sync import (
     SheetsSyncError,
     SheetsSyncService,
+    merge_deleted_into_upload_payload,
     merge_unique_local_into_upload_payload,
     parse_sheet_id_from_url,
 )
@@ -100,8 +101,7 @@ async def create_bookmark(bookmark: Bookmark):
         country=bookmark.country,
         note=bookmark.note,
         category_id=bookmark.category_id,
-        added_by=bookmark.added_by,
-        added_at=bookmark.added_at,
+        updated_by=bookmark.updated_by,
     )
 
 
@@ -110,7 +110,6 @@ async def update_bookmark(bookmark_id: str, bookmark: Bookmark):
     bm = _bm()
     # User edits invalidate the "cloud" source flag — once a record diverges
     # from the upstream Sheet, treat it as local-pending until next upload.
-    # added_by tracks last editor (frontend stamps current nickname).
     updated = bm.update_bookmark(
         bookmark_id,
         name=bookmark.name,
@@ -119,7 +118,7 @@ async def update_bookmark(bookmark_id: str, bookmark: Bookmark):
         country=bookmark.country,
         note=bookmark.note,
         category_id=bookmark.category_id,
-        added_by=bookmark.added_by,
+        updated_by=bookmark.updated_by,
         source="local",
     )
     if not updated:
@@ -130,22 +129,9 @@ async def update_bookmark(bookmark_id: str, bookmark: Bookmark):
 @router.delete("/{bookmark_id}")
 async def delete_bookmark(bookmark_id: str):
     bm = _bm()
-    # Look up first so we can refuse cloud deletions before mutating anything.
-    target = next((b for b in bm.list_bookmarks() if b.id == bookmark_id), None)
+    target = next((b for b in bm.list_bookmarks(include_deleted=True) if b.id == bookmark_id), None)
     if target is None:
         raise HTTPException(status_code=404, detail="Bookmark not found")
-    if target.source == "cloud":
-        # Cloud rows live in the shared Sheet — by design the desktop app
-        # can only add or edit them, not delete. Removing them has to happen
-        # in Google Sheets directly so all collaborators see the change
-        # through the same audit trail.
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "cloud_delete_forbidden",
-                "message": "雲端共編書籤無法從 app 刪除,請到 Google Sheets 刪除該 row。",
-            },
-        )
     if not bm.delete_bookmark(bookmark_id):
         raise HTTPException(status_code=404, detail="Bookmark not found")
     return {"status": "deleted"}
@@ -192,11 +178,10 @@ async def delete_category(cat_id: str):
 
 
 # ── Import / Export ───────────────────────────────────────
-# Both use the same 8-column CSV layout as the Google Sheets template, so
+# Both use the same CSV layout as the Google Sheets template, so
 # users can paste exports straight into Sheets and import any CSV emitted by
 # Sheets (or another ios-locctl install) without translation.
-
-CSV_FIELDS = ["name", "lat", "lng", "country", "category", "added_by", "added_at", "note"]
+CSV_FIELDS = ["name", "lat", "lng", "country", "category", "updated_by", "updated_at", "note"]
 
 
 @router.get("/export")
@@ -217,8 +202,8 @@ async def export_bookmarks():
             "lng": b.lng,
             "country": b.country,
             "category": cat_name_by_id.get(b.category_id, "未分類"),
-            "added_by": b.added_by,
-            "added_at": b.added_at,
+            "updated_by": b.updated_by,
+            "updated_at": b.updated_at,
             "note": b.note,
         })
     return Response(
@@ -373,7 +358,7 @@ async def check_sync_diff():
     cfg = _load_sheets_config()
     sheet_id = cfg.get("sheet_id")
     bm = _bm()
-    local_cloud_count = sum(1 for b in bm.list_bookmarks() if b.source == "cloud")
+    local_cloud_count = sum(1 for b in bm.list_bookmarks(include_deleted=True) if b.source == "cloud")
 
     if not sheet_id:
         return {"configured": False, "cloud_count": 0, "local_cloud_count": local_cloud_count, "has_updates": False}
@@ -408,7 +393,7 @@ async def get_sync_status():
     cfg = _load_sheets_config()
     meta = _load_sync_meta()
     bm = _bm()
-    pending_local = sum(1 for b in bm.list_bookmarks() if b.source == "local")
+    pending_local = sum(1 for b in bm.list_bookmarks(include_deleted=True) if b.source in {"local", "deleted"})
     return {
         "configured": bool(cfg.get("sheet_id")),
         "sheet_id": cfg.get("sheet_id", ""),
@@ -501,8 +486,9 @@ async def upload_local_bookmarks():
         )
 
     bm = _bm()
-    payload = merge_unique_local_into_upload_payload(bm.store)
-    if not payload:
+    upserts = merge_unique_local_into_upload_payload(bm.store)
+    deletes = merge_deleted_into_upload_payload(bm.store)
+    if not upserts and not deletes:
         return {
             "status": "noop", "added": 0, "updated": 0, "skipped": 0,
             "message": "沒有待上傳的本地書籤",
@@ -512,7 +498,7 @@ async def upload_local_bookmarks():
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             resp = await client.post(
                 webhook,
-                json={"action": "upsert", "items": payload},
+                json={"action": "sync", "upserts": upserts, "deletes": deletes},
             )
     except httpx.HTTPError as e:
         raise HTTPException(
@@ -544,8 +530,8 @@ async def upload_local_bookmarks():
                     "message": f"webhook 錯誤: {result['error']}"},
         )
 
-    # Both added and updated items are now in cloud — flip their source flag
-    # so the upload button stops showing them as pending.
+    # Upserts become cloud again; deletes are removed locally once cloud
+    # confirms them.
     from services.sheets_sync import _coord_key
     synced_keys: set[str] = set()
     for bucket in ("added_items", "updated_items"):
@@ -554,18 +540,25 @@ async def upload_local_bookmarks():
                 synced_keys.add(_coord_key(item["lat"], item["lng"]))
 
     flipped = 0
-    for b in bm.list_bookmarks():
+    for b in bm.list_bookmarks(include_deleted=True):
         if b.source == "local" and _coord_key(b.lat, b.lng) in synced_keys:
             b.source = "cloud"
             flipped += 1
-    if flipped:
+    deleted_keys: set[str] = set()
+    for item in (result.get("deleted_items") or []):
+        if "lat" in item and "lng" in item:
+            deleted_keys.add(_coord_key(item["lat"], item["lng"]))
+    purged = bm.purge_bookmarks_by_coords(deleted_keys) if deleted_keys else 0
+    if flipped and not purged:
         bm._save()
 
     return {
         "status": "ok",
         "added": result.get("added", 0),
         "updated": result.get("updated", 0),
+        "deleted": result.get("deleted", 0),
         "skipped": result.get("skipped", 0),
         "flipped_to_cloud": flipped,
+        "purged_local": purged,
         "skipped_items": result.get("skipped_items", []),
     }

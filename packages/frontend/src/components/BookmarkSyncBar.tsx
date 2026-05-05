@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import type { SyncStatus, UploadResult } from '../services/api'
 
 // Inline SVG icons — emoji on macOS render inconsistently across system fonts
@@ -58,6 +58,8 @@ interface Props {
   onSync: () => Promise<void>
   onSetConfig: (patch: { sheet_url_or_id?: string; tab_name?: string; webhook_url?: string }) => Promise<void>
   onUpload: () => Promise<UploadResult>
+  showConfigButton?: boolean
+  openConfigSignal?: number
 }
 
 /**
@@ -69,7 +71,16 @@ interface Props {
  * The upload button is only shown when there are pending local records,
  * so a fresh "all cloud" install isn't cluttered.
  */
-const BookmarkSyncBar: React.FC<Props> = ({ status, syncing, hasCloudUpdates, onSync, onSetConfig, onUpload }) => {
+const BookmarkSyncBar: React.FC<Props> = ({
+  status,
+  syncing,
+  hasCloudUpdates,
+  onSync,
+  onSetConfig,
+  onUpload,
+  showConfigButton = true,
+  openConfigSignal = 0,
+}) => {
   const [showConfig, setShowConfig] = useState(false)
   const [sheetInput, setSheetInput] = useState('')
   const [webhookInput, setWebhookInput] = useState('')
@@ -78,6 +89,7 @@ const BookmarkSyncBar: React.FC<Props> = ({ status, syncing, hasCloudUpdates, on
   const [syncError, setSyncError] = useState<string | null>(null)
   const [uploadingState, setUploadingState] = useState(false)
   const [transientMsg, setTransientMsg] = useState<string | null>(null)
+  const lastOpenConfigSignal = useRef(openConfigSignal)
 
   // Prefill modal whenever it opens — using values from the most recent
   // status fetch, not stale state.
@@ -87,6 +99,13 @@ const BookmarkSyncBar: React.FC<Props> = ({ status, syncing, hasCloudUpdates, on
       setWebhookInput(status?.webhook_url || '')
     }
   }, [showConfig, status])
+
+  useEffect(() => {
+    if (openConfigSignal > lastOpenConfigSignal.current) {
+      setShowConfig(true)
+    }
+    lastOpenConfigSignal.current = openConfigSignal
+  }, [openConfigSignal])
 
   const flashMsg = (msg: string) => {
     setTransientMsg(msg)
@@ -115,13 +134,14 @@ const BookmarkSyncBar: React.FC<Props> = ({ status, syncing, hasCloudUpdates, on
     try {
       const r = await onUpload()
       if (r.status === 'noop') {
-        flashMsg('沒有待上傳的本地書籤')
+        flashMsg('沒有待上傳的書籤')
       } else {
         const parts: string[] = []
         if (r.added) parts.push(`新增 ${r.added}`)
-        if (r.updated) parts.push(`更新 ${r.updated}`)
+        if (r.updated) parts.push(`修改 ${r.updated}`)
+        if (r.deleted) parts.push(`刪除 ${r.deleted}`)
         if (r.skipped) parts.push(`跳過 ${r.skipped}`)
-        flashMsg(`✓ 已同步到雲端: ${parts.join('、') || '無變更'}`)
+        flashMsg(`✓ 已同步書籤: ${parts.join('、') || '無變更'}`)
       }
     } catch (e: any) {
       setSyncError(e?.message || '上傳失敗')
@@ -157,7 +177,7 @@ const BookmarkSyncBar: React.FC<Props> = ({ status, syncing, hasCloudUpdates, on
         >
           <ArrowDownIcon /> {syncing ? '下載中⋯' : '下載雲端'}
           {hasCloudUpdates && !syncing && (
-            <span style={updateBadgeStyle} title="雲端 Sheets 有變動,按下載同步">NEW</span>
+            <span style={updateBadgeStyle} title="雲端 Sheets 有變動,按下載同步">更新</span>
           )}
         </button>
         {pendingLocal > 0 && (
@@ -166,26 +186,29 @@ const BookmarkSyncBar: React.FC<Props> = ({ status, syncing, hasCloudUpdates, on
             style={{ ...uploadBtnStyle, opacity: uploadingState ? 0.6 : 1 }}
             disabled={uploadingState}
             onClick={handleUpload}
-            title={status?.webhook_configured ? `把 ${pendingLocal} 筆本地書籤推到雲端 Sheets` : '請先設定 Webhook URL'}
+            title={status?.webhook_configured ? `把 ${pendingLocal} 筆書籤變更推到雲端 Sheets` : '請先設定 Webhook URL'}
           >
-            <ArrowUpIcon /> {uploadingState ? '上傳中⋯' : `上傳本地 ${pendingLocal}`}
+            <ArrowUpIcon /> {uploadingState ? '上傳中⋯' : `上傳變更 ${pendingLocal}`}
           </button>
         )}
         <span style={lastSyncedStyle}>
           {!status?.configured && '未設定雲端 Sheets'}
-          {status?.configured && !status.last_synced_at && '尚未下載'}
+          {status?.configured && pendingLocal > 0 && !transientMsg && `本地有 ${pendingLocal} 筆變更`}
+          {status?.configured && pendingLocal === 0 && !status.last_synced_at && '尚未同步'}
           {status?.configured && status.last_synced_at && (
-            transientMsg || `上次:${formatRelative(status.last_synced_at)}`
+            transientMsg || (pendingLocal > 0 ? `本地有 ${pendingLocal} 筆變更` : `最後同步 ${formatRelative(status.last_synced_at)}`)
           )}
         </span>
-        <button
-          className="action-btn"
-          style={configBtnStyle}
-          onClick={() => setShowConfig(true)}
-          title="設定 Sheets URL 與上傳 Webhook"
-        >
-          <GearIcon />
-        </button>
+        {showConfigButton && (
+          <button
+            className="action-btn"
+            style={configBtnStyle}
+            onClick={() => setShowConfig(true)}
+            title="設定 Sheets URL 與上傳 Webhook"
+          >
+            <GearIcon />
+          </button>
+        )}
       </div>
       {syncError && (
         <div style={syncErrStyle} onClick={() => setSyncError(null)}>{syncError}</div>
@@ -194,7 +217,7 @@ const BookmarkSyncBar: React.FC<Props> = ({ status, syncing, hasCloudUpdates, on
       {showConfig && (
         <div style={modalOverlay} onClick={() => !configSaving && setShowConfig(false)}>
           <div style={modalCard} onClick={(e) => e.stopPropagation()}>
-            <div style={modalTitle}>雲端書籤設定</div>
+            <div style={modalTitle}>雲端同步設定</div>
 
             <label style={fieldLabel}>Google Sheets URL（下載雲端用）</label>
             <input
@@ -207,7 +230,8 @@ const BookmarkSyncBar: React.FC<Props> = ({ status, syncing, hasCloudUpdates, on
               style={modalInput}
             />
             <p style={modalHelp}>
-              試算表必須設成「<strong>知道連結的人都能查看</strong>」,tab 名稱固定為 <code>bookmarks</code>。
+              試算表必須設成「<strong>知道連結的人都能查看</strong>」。
+              這份 sheet 會同時使用 <code>bookmarks</code> 和 <code>routes</code> 兩個 tab。
             </p>
 
             <label style={fieldLabel}>Apps Script Webhook URL（上傳本地用,可選）</label>
@@ -220,7 +244,7 @@ const BookmarkSyncBar: React.FC<Props> = ({ status, syncing, hasCloudUpdates, on
               style={modalInput}
             />
             <p style={modalHelp}>
-              讓 app 內加的書籤一鍵推上雲端 Sheets。部署步驟見&nbsp;
+              讓 app 內的書籤和路線都能一鍵推上雲端 Sheets。部署步驟見&nbsp;
               <code>scripts/sheets_seed/Code.gs</code> 檔頭註解。沒設也可以用 — 加的書籤就只在本機。
             </p>
 
@@ -269,7 +293,7 @@ const syncBtnStyle: React.CSSProperties = { padding: '3px 9px', fontSize: 11 }
 const updateBadgeStyle: React.CSSProperties = {
   marginLeft: 6,
   padding: '0 5px',
-  borderRadius: 8,
+  borderRadius: 4,
   background: 'linear-gradient(90deg, #ff6b6b, #ffc107)',
   color: '#fff',
   fontSize: 9,

@@ -36,6 +36,8 @@ data/settings.json
 # One-shot migration safety net produced by scripts/migrate_bookmarks.py
 data/bookmarks_pre_migration.json
 # Phase B1 sync artifacts (per-install runtime state)
+data/bookmarks.json
+data/routes.json
 data/bookmarks.local_backup.json
 data/sheets_sync_meta.json
 data/sheets_config.json

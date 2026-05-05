@@ -11,9 +11,9 @@ export interface Bookmark {
   created_at?: string
   // Phase A — cloud-coediting fields
   country?: string
-  added_by?: string
-  added_at?: string
-  source?: 'cloud' | 'local'
+  updated_by?: string
+  updated_at?: string
+  source?: 'cloud' | 'local' | 'deleted'
   last_interacted_at?: string
 }
 

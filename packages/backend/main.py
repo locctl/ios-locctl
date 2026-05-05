@@ -15,6 +15,7 @@ from services.cooldown import CooldownTimer
 from services.bookmarks import BookmarkManager
 from services.coord_format import CoordinateFormatter
 from services.reconnect import ReconnectManager
+from services.routes import RouteManager
 
 # Configure logging
 _log_fmt = "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
@@ -44,6 +45,7 @@ class AppState:
         self.simulation_engine = None  # Created when a device connects
         self.cooldown_timer = CooldownTimer()
         self.bookmark_manager = BookmarkManager()
+        self.route_manager = RouteManager()
         self.coord_formatter = CoordinateFormatter()
         self.reconnect_manager = None
         self._last_position = None

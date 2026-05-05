@@ -32,6 +32,7 @@ import PauseControl from './PauseControl';
 import { SimMode, MoveMode } from '../hooks/useSimulation';
 import AddressSearch from './AddressSearch';
 import BookmarkList from './BookmarkList';
+import RouteSyncBar from './RouteSyncBar';
 
 interface Position {
   lat: number;
@@ -52,6 +53,8 @@ interface SavedRoute {
   id: string;
   name: string;
   waypoints: Position[];
+  updated_by?: string;
+  updated_at?: string;
 }
 
 interface ControlPanelProps {
@@ -102,8 +105,10 @@ interface ControlPanelProps {
   onRouteDelete?: (id: string) => void;
   onRouteGpxImport?: (file: File) => Promise<void>;
   onRouteGpxExport?: (id: string) => void;
-  onRouteShareCopy?: (id: string) => Promise<void>;
-  onRoutePasteImport?: (code: string) => Promise<void>;
+  routeSyncStatus?: import('../services/api').SyncStatus | null;
+  routeSyncing?: boolean;
+  onRouteSync?: () => Promise<void>;
+  onRouteUpload?: () => Promise<import('../services/api').UploadResult>;
   randomWalkRadius: number;
   pauseRandomWalk?: { enabled: boolean; min: number; max: number };
   onPauseRandomWalkChange?: (v: { enabled: boolean; min: number; max: number }) => void;
@@ -218,8 +223,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onRouteDelete,
   onRouteGpxImport,
   onRouteGpxExport,
-  onRouteShareCopy,
-  onRoutePasteImport,
+  routeSyncStatus,
+  routeSyncing,
+  onRouteSync,
+  onRouteUpload,
   randomWalkRadius,
   pauseRandomWalk,
   onPauseRandomWalkChange,
@@ -243,10 +250,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   const [routeName, setRouteName] = useState('');
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [editingRouteName, setEditingRouteName] = useState('');
-  const [showRoutePaste, setShowRoutePaste] = useState(false);
-  const [routePasteValue, setRoutePasteValue] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [libraryTab, setLibraryTab] = useState<'bookmarks' | 'routes'>('bookmarks');
+  const [syncConfigSignal, setSyncConfigSignal] = useState(0);
   const [libraryPos, setLibraryPos] = useState<{ x: number; y: number }>(() => ({
     x: Math.max(20, window.innerWidth - 440),
     y: 70,
@@ -655,6 +661,19 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 style={{ flex: 1, borderRadius: 0, padding: '10px', background: libraryTab === 'routes' ? '#2d4373' : 'transparent' }}
                 onClick={() => setLibraryTab('routes')}
               >{t('panel.routes_count')} ({savedRoutes.length})</button>
+              {onBookmarkSetSyncConfig && (
+                <button
+                  className="action-btn"
+                  style={{ padding: '10px 12px', borderRadius: 0 }}
+                  onClick={() => setSyncConfigSignal((v) => v + 1)}
+                  title="設定雲端同步"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                  </svg>
+                </button>
+              )}
               <button
                 className="action-btn"
                 style={{ padding: '10px 14px', borderRadius: 0 }}
@@ -662,7 +681,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 title={t('panel.close')}
               >X</button>
             </div>
-            <div style={{ padding: 12, overflowY: 'auto', flex: 1 }}>
+            <div style={{ padding: 12, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
               {libraryTab === 'bookmarks' ? (
                 <BookmarkList
                   bookmarks={bookmarks}
@@ -682,9 +701,19 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   onSync={onBookmarkSync}
                   onSetSyncConfig={onBookmarkSetSyncConfig}
                   onUploadLocal={onBookmarkUploadLocal}
+                  showConfigButton={false}
+                  openConfigSignal={syncConfigSignal}
                 />
               ) : (
-                <>
+                <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
+                  {routeSyncStatus && onRouteSync && onRouteUpload && (
+                    <RouteSyncBar
+                      status={routeSyncStatus}
+                      syncing={!!routeSyncing}
+                      onSync={onRouteSync}
+                      onUpload={onRouteUpload}
+                    />
+                  )}
                   <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 6 }}>
                     {t('panel.route_save_hint', { n: currentWaypointsCount })}
                   </div>
@@ -708,7 +737,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                       }}
                     >{t('generic.save')}</button>
                   </div>
-                  {(onRouteGpxImport || onRoutePasteImport) && (
+                  {(onRouteGpxImport) && (
                     <div style={{ marginBottom: 10, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       {onRouteGpxImport && (
                         <label
@@ -736,41 +765,25 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                           />
                         </label>
                       )}
-                      {onRoutePasteImport && (
-                        <button
-                          className="action-btn"
-                          style={{
-                            display: 'inline-flex', alignItems: 'center', gap: 4,
-                            padding: '4px 10px', fontSize: 11, cursor: 'pointer',
-                          }}
-                          onClick={() => { setRoutePasteValue(''); setShowRoutePaste(true); }}
-                          title="貼上朋友傳的路線分享碼"
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="9" y="9" width="13" height="13" rx="2" />
-                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-                          </svg>
-                          貼上分享碼
-                        </button>
-                      )}
                     </div>
                   )}
-                  {savedRoutes.length === 0 && (
-                    <div style={{ fontSize: 12, opacity: 0.5, padding: '8px 0' }}>{t('panel.route_empty')}</div>
-                  )}
-                  {savedRoutes.map((route) => {
-                    const isEditing = editingRouteId === route.id;
-                    const commitRename = () => {
-                      const n = editingRouteName.trim();
-                      if (n && n !== route.name && onRouteRename) onRouteRename(route.id, n);
-                      setEditingRouteId(null);
-                    };
-                    return (
-                      <div
-                        key={route.id}
-                        className="bookmark-item"
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px', borderRadius: 4 }}
-                      >
+                  <div style={{ overflowY: 'auto', flex: 1, minHeight: 0, paddingRight: 2 }}>
+                    {savedRoutes.length === 0 && (
+                      <div style={{ fontSize: 12, opacity: 0.5, padding: '8px 0' }}>{t('panel.route_empty')}</div>
+                    )}
+                    {savedRoutes.map((route) => {
+                      const isEditing = editingRouteId === route.id;
+                      const commitRename = () => {
+                        const n = editingRouteName.trim();
+                        if (n && n !== route.name && onRouteRename) onRouteRename(route.id, n);
+                        setEditingRouteId(null);
+                      };
+                      return (
+                        <div
+                          key={route.id}
+                          className="bookmark-item"
+                          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px', borderRadius: 4 }}
+                        >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           <polyline points="22,12 18,12 15,21 9,3 6,12 2,12" />
                         </svg>
@@ -788,13 +801,20 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                             style={{ flex: 1, fontSize: 13, padding: '2px 4px' }}
                           />
                         ) : (
-                          <span
-                            style={{ fontSize: 13, flex: 1, cursor: 'pointer' }}
+                          <div
+                            style={{ flex: 1, minWidth: 0, cursor: 'pointer', display: 'flex', flexDirection: 'column' }}
                             onClick={() => { onRouteLoad(route.id); setLibraryOpen(false); }}
                             title={t('panel.route_load_tooltip')}
                           >
-                            {route.name}
-                          </span>
+                            <span style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {route.name}
+                            </span>
+                            {route.updated_by && (
+                              <span style={{ fontSize: 10, opacity: 0.52, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {route.updated_by}
+                              </span>
+                            )}
+                          </div>
                         )}
                         <span style={{ opacity: 0.5, fontSize: 11 }}>
                           {route.waypoints.length} pts
@@ -813,19 +833,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                               <path d="M12 20h9" />
                               <path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
-                            </svg>
-                          </button>
-                        )}
-                        {onRouteShareCopy && (
-                          <button
-                            className="action-btn"
-                            title="複製路線分享碼,可貼給朋友"
-                            onClick={(e) => { e.stopPropagation(); onRouteShareCopy(route.id); }}
-                            style={{ padding: '2px 6px', fontSize: 10 }}
-                          >
-                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <rect x="9" y="9" width="13" height="13" rx="2" />
-                              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
                             </svg>
                           </button>
                         )}
@@ -852,10 +859,11 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                             X
                           </button>
                         )}
-                      </div>
-                    );
-                  })}
-                </>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               )}
             </div>
           </div>
@@ -882,50 +890,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         <span style={{ opacity: 0.7 }}>by Mars</span>
       </div>
 
-      {showRoutePaste && onRoutePasteImport && createPortal(
-        <div
-          onClick={() => setShowRoutePaste(false)}
-          style={{
-            position: 'fixed', inset: 0, background: 'rgba(8, 10, 20, 0.6)',
-            backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
-            zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: 'rgba(26, 29, 39, 0.97)',
-              border: '1px solid rgba(108, 140, 255, 0.3)',
-              borderRadius: 10, padding: '20px 22px', width: 460, color: '#e0e0e0',
-            }}
-          >
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>貼上路線分享碼</div>
-            <p style={{ fontSize: 12, opacity: 0.65, lineHeight: 1.6, margin: '0 0 10px' }}>
-              朋友傳來的字串以 <code>ios-locctl-route:</code> 開頭。整段貼進來。
-            </p>
-            <textarea
-              className="search-input"
-              autoFocus
-              value={routePasteValue}
-              onChange={(e) => setRoutePasteValue(e.target.value)}
-              placeholder="ios-locctl-route:..."
-              style={{ width: '100%', minHeight: 110, fontSize: 11, fontFamily: 'monospace', resize: 'vertical', marginBottom: 12 }}
-            />
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button className="action-btn" onClick={() => setShowRoutePaste(false)}>取消</button>
-              <button
-                className="action-btn primary"
-                disabled={!routePasteValue.trim()}
-                onClick={async () => {
-                  await onRoutePasteImport(routePasteValue.trim());
-                  setShowRoutePaste(false);
-                }}
-              >匯入</button>
-            </div>
-          </div>
-        </div>,
-        document.body,
-      )}
     </div>
   );
 };

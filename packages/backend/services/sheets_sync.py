@@ -172,6 +172,10 @@ class SheetsSyncService:
                 # New cloud record
                 new_bookmarks.append(cloud_bm)
                 added += 1
+            elif existing.source == "deleted":
+                # Local user explicitly deleted this bookmark and hasn't
+                # uploaded that intent yet — don't resurrect it from cloud.
+                continue
             else:
                 # Overwrite metadata, but preserve the existing UUID + timestamps
                 # so frontend referential identity stays stable across syncs.
@@ -179,8 +183,8 @@ class SheetsSyncService:
                 existing.country = cloud_bm.country
                 existing.note = cloud_bm.note
                 existing.category_id = cloud_bm.category_id
-                existing.added_by = cloud_bm.added_by
-                existing.added_at = cloud_bm.added_at
+                existing.updated_by = cloud_bm.updated_by
+                existing.updated_at = cloud_bm.updated_at
                 # Adopt the cloud copy: a "local" record now has a cloud twin.
                 existing.source = "cloud"
                 updated += 1
@@ -194,7 +198,7 @@ class SheetsSyncService:
             key = _coord_key(bm.lat, bm.lng)
             if key in cloud_keys:
                 kept.append(bm)
-            elif bm.source == "local":
+            elif bm.source in {"local", "deleted"}:
                 kept.append(bm)
             else:
                 removed += 1
@@ -287,8 +291,8 @@ class SheetsSyncService:
             created_at=now_iso,
             last_used_at=now_iso,
             country=(raw.get("country") or "").strip(),
-            added_by=(raw.get("added_by") or "").strip(),
-            added_at=(raw.get("added_at") or "").strip(),
+            updated_by=(raw.get("updated_by") or raw.get("added_by") or "").strip(),
+            updated_at=(raw.get("updated_at") or raw.get("added_at") or "").strip(),
             source="cloud",
         )
 
@@ -308,8 +312,23 @@ def merge_unique_local_into_upload_payload(store: BookmarkStore) -> list[dict]:
             "lng": bm.lng,
             "country": bm.country,
             "category": cat_name_by_id.get(bm.category_id, "未分類"),
-            "added_by": bm.added_by,
-            "added_at": bm.added_at,
+            "updated_by": bm.updated_by,
+            "updated_at": bm.updated_at,
             "note": bm.note,
+        })
+    return out
+
+
+def merge_deleted_into_upload_payload(store: BookmarkStore) -> list[dict]:
+    out = []
+    for bm in store.bookmarks:
+        if bm.source != "deleted":
+            continue
+        out.append({
+            "name": bm.name,
+            "lat": bm.lat,
+            "lng": bm.lng,
+            "updated_by": bm.updated_by,
+            "updated_at": bm.updated_at,
         })
     return out

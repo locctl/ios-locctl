@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useT } from '../i18n';
 import BookmarkSyncBar, { CloudIcon, PinIcon } from './BookmarkSyncBar';
 import type { SyncStatus } from '../services/api';
+import Tooltip from './Tooltip';
 
 interface Bookmark {
   id?: string;
@@ -11,9 +12,9 @@ interface Bookmark {
   category: string;
   country?: string;
   note?: string;
-  source?: 'cloud' | 'local';
-  added_by?: string;
-  added_at?: string;
+  source?: 'cloud' | 'local' | 'deleted';
+  updated_by?: string;
+  updated_at?: string;
 }
 
 interface Position {
@@ -40,6 +41,8 @@ interface BookmarkListProps {
   onSync?: () => Promise<void>;
   onSetSyncConfig?: (patch: { sheet_url_or_id?: string; tab_name?: string; webhook_url?: string }) => Promise<void>;
   onUploadLocal?: () => Promise<import('../services/api').UploadResult>;
+  showConfigButton?: boolean;
+  openConfigSignal?: number;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -79,6 +82,8 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   onSync,
   onSetSyncConfig,
   onUploadLocal,
+  showConfigButton = true,
+  openConfigSignal = 0,
 }) => {
   const t = useT();
   const displayCat = (name: string) => name;  // backend already stores friendly names since Phase A
@@ -120,7 +125,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   }
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
       {/* Sheets sync bar (Phase B1 + B2) */}
       {onSync && onSetSyncConfig && onUploadLocal && (
         <BookmarkSyncBar
@@ -130,6 +135,8 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
           onSync={onSync}
           onSetConfig={onSetSyncConfig}
           onUpload={onUploadLocal}
+          showConfigButton={showConfigButton}
+          openConfigSignal={openConfigSignal}
         />
       )}
 
@@ -314,9 +321,10 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
         </div>
       )}
 
-      {/* Bookmark groups */}
-      {Object.entries(bookmarksByCategory).map(([cat, bms]) => (
-        <div key={cat} className="bookmark-group" style={{ marginBottom: 4 }}>
+      <div style={{ overflowY: 'auto', flex: 1, minHeight: 0, paddingRight: 2 }}>
+        {/* Bookmark groups */}
+        {Object.entries(bookmarksByCategory).map(([cat, bms]) => (
+          <div key={cat} className="bookmark-group" style={{ marginBottom: 4 }}>
           <div
             style={{
               display: 'flex',
@@ -365,6 +373,17 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                 <div style={{ fontSize: 11, opacity: 0.4, padding: '4px 0' }}>{t('bm.blank')}</div>
               )}
           {bms.map((bm) => (
+                <Tooltip
+                  key={bm.id ?? `${bm.lat}-${bm.lng}`}
+                  content={bm.updated_by ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, whiteSpace: 'nowrap' }}>
+                      <span>{bm.updated_by}</span>
+                      <span style={{ opacity: 0.72 }}>
+                        最後更新: {bm.updated_at || '尚無更新時間'}
+                      </span>
+                    </div>
+                  ) : undefined}
+                >
                 <div
                   key={bm.id ?? `${bm.lat}-${bm.lng}`}
                   className="bookmark-item"
@@ -441,10 +460,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                         </svg>
                       </button>
                     )}
-                    {bm.id && bm.source !== 'cloud' && (
-                      // Cloud bookmarks are owned by the shared Sheet — by
-                      // design the desktop app can't delete them; users have
-                      // to remove the row in Google Sheets directly.
+                    {bm.id && (
                       <button
                         type="button"
                         onClick={(e) => {
@@ -471,16 +487,18 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                     )}
                   </div>
                 </div>
-              ))}
+                </Tooltip>
+          ))}
             </div>
           )}
-        </div>
-      ))}
-      {bookmarks.length === 0 && (
-        <div style={{ fontSize: 12, opacity: 0.5, padding: '8px 0', textAlign: 'center' }}>
-          {t('bm.empty')}
-        </div>
-      )}
+          </div>
+        ))}
+        {bookmarks.length === 0 && (
+          <div style={{ fontSize: 12, opacity: 0.5, padding: '8px 0', textAlign: 'center' }}>
+            {t('bm.empty')}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

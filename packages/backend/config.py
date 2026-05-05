@@ -31,6 +31,7 @@ else:
 
 SETTINGS_FILE = DATA_DIR / "settings.json"
 BOOKMARKS_FILE = DATA_DIR / "bookmarks.json"
+ROUTES_FILE = DATA_DIR / "routes.json"
 SHEETS_CONFIG_FILE = DATA_DIR / "sheets_config.json"
 SHEETS_SYNC_META_FILE = DATA_DIR / "sheets_sync_meta.json"
 BOOKMARKS_LOCAL_BACKUP_FILE = DATA_DIR / "bookmarks.local_backup.json"
@@ -40,6 +41,7 @@ BOOKMARKS_LOCAL_BACKUP_FILE = DATA_DIR / "bookmarks.local_backup.json"
 # User's own sheet_id (set via the in-app config modal) overrides this.
 DEFAULT_SHEET_ID = "1GDTyBgBzkBiOAEc8GdlaS7pKmPWq2cMdYNLjqNwjdiU"
 DEFAULT_SHEET_TAB = "bookmarks"
+DEFAULT_ROUTES_TAB = "routes"
 # Apps Script Web App deployment for the same Sheet — pre-wired so users
 # can hit "📤 上傳" without first having to deploy their own webhook. They
 # can override with their own deployment if they want to write to a

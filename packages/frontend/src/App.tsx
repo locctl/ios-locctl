@@ -43,6 +43,8 @@ const App: React.FC = () => {
   const bm = useBookmarks()
 
   const [savedRoutes, setSavedRoutes] = useState<any[]>([])
+  const [routeSyncStatus, setRouteSyncStatus] = useState<api.SyncStatus | null>(null)
+  const [routeSyncing, setRouteSyncing] = useState(false)
   const [cooldown, setCooldown] = useState(0)
   const [cooldownEnabled, setCooldownEnabled] = useState(true)
   const [randomWalkRadius, setRandomWalkRadius] = useState(500)
@@ -127,6 +129,7 @@ const App: React.FC = () => {
   // Load saved routes on mount
   useEffect(() => {
     api.getSavedRoutes().then(setSavedRoutes).catch(() => {})
+    api.getRouteSyncStatus().then(setRouteSyncStatus).catch(() => {})
   }, [])
 
   // Auto-scan devices when WebSocket (re)connects (e.g. after backend restart)
@@ -231,9 +234,7 @@ const App: React.FC = () => {
           country: value.country.trim(),
           note: value.note.trim(),
           category_id: cat?.id || 'default',
-          // Stamp the editor — added_by tracks "who last touched this" so
-          // the cloud row reflects the most recent contributor.
-          added_by: nickname.name,
+          updated_by: nickname.name,
         })
       } else {
         await bm.createBookmark({
@@ -243,7 +244,7 @@ const App: React.FC = () => {
           country: value.country.trim(),
           note: value.note.trim(),
           category_id: cat?.id || 'default',
-          added_by: nickname.name,
+          updated_by: nickname.name,
         })
       }
       setBookmarkDialog(null)
@@ -413,25 +414,27 @@ const App: React.FC = () => {
       return
     }
     try {
-      await api.saveRoute({ name, waypoints: sim.waypoints, profile: sim.moveMode })
+      await api.saveRoute({ name, waypoints: sim.waypoints, profile: sim.moveMode, updated_by: nickname.name })
       const routes = await api.getSavedRoutes()
       setSavedRoutes(routes)
+      api.getRouteSyncStatus().then(setRouteSyncStatus).catch(() => {})
       showToast(t('toast.route_saved', { name }))
     } catch (err: any) {
       showToast(t('toast.route_save_failed', { msg: err.message || '' }))
     }
-  }, [sim, showToast])
+  }, [nickname.name, showToast, sim, t])
 
   const handleGpxImport = useCallback(async (file: File) => {
     try {
       const res = await api.importGpx(file)
       const routes = await api.getSavedRoutes()
       setSavedRoutes(routes)
+      api.getRouteSyncStatus().then(setRouteSyncStatus).catch(() => {})
       showToast(t('toast.gpx_imported', { n: res.points }))
     } catch (err: any) {
       showToast(t('toast.gpx_import_failed', { msg: err.message || '' }))
     }
-  }, [showToast])
+  }, [nickname.name, showToast])
 
   const handleGpxExport = useCallback(async (id: string) => {
     const route = savedRoutes.find((r) => r.id === id)
@@ -452,32 +455,6 @@ const App: React.FC = () => {
       showToast(t('toast.gpx_export_failed', { msg: err?.message || '' }))
     }
   }, [savedRoutes, showToast, t])
-
-  const handleRouteShareCopy = useCallback(async (id: string) => {
-    const route = savedRoutes.find((r) => r.id === id)
-    if (!route) return
-    try {
-      const { encodeRoute } = await import('./utils/routeShare')
-      const code = encodeRoute({ name: route.name, waypoints: route.waypoints || [] })
-      await navigator.clipboard.writeText(code)
-      showToast(`✓ 已複製 ${route.name} 的分享碼`)
-    } catch (err: any) {
-      showToast(`複製失敗: ${err?.message || 'unknown'}`)
-    }
-  }, [savedRoutes, showToast])
-
-  const handleRoutePasteImport = useCallback(async (code: string) => {
-    try {
-      const { decodeRoute } = await import('./utils/routeShare')
-      const r = decodeRoute(code)
-      await api.saveRoute({ name: r.name, waypoints: r.waypoints, profile: 'walking' })
-      const routes = await api.getSavedRoutes()
-      setSavedRoutes(routes)
-      showToast(`✓ 已匯入路線 ${r.name} (${r.waypoints.length} pts)`)
-    } catch (err: any) {
-      showToast(`匯入失敗: ${err?.message || 'unknown'}`)
-    }
-  }, [showToast])
 
   const handleApplySpeed = useCallback(async () => {
     try {
@@ -525,9 +502,10 @@ const App: React.FC = () => {
 
   const handleRouteRename = useCallback(async (id: string, name: string) => {
     try {
-      await api.renameRoute(id, name)
+      await api.renameRoute(id, name, nickname.name)
       const routes = await api.getSavedRoutes()
       setSavedRoutes(routes)
+      api.getRouteSyncStatus().then(setRouteSyncStatus).catch(() => {})
     } catch (err: any) {
       showToast(err.message || t('toast.route_rename_failed'))
     }
@@ -538,11 +516,32 @@ const App: React.FC = () => {
       await api.deleteRoute(id)
       const routes = await api.getSavedRoutes()
       setSavedRoutes(routes)
+      api.getRouteSyncStatus().then(setRouteSyncStatus).catch(() => {})
       showToast(t('toast.route_deleted'))
     } catch (err: any) {
       showToast(err.message || t('toast.route_delete_failed'))
     }
   }, [showToast])
+
+  const handleRouteSync = useCallback(async () => {
+    setRouteSyncing(true)
+    try {
+      await api.syncRoutes()
+      const [routes, status] = await Promise.all([api.getSavedRoutes(), api.getRouteSyncStatus()])
+      setSavedRoutes(routes)
+      setRouteSyncStatus(status)
+    } finally {
+      setRouteSyncing(false)
+    }
+  }, [])
+
+  const handleRouteUpload = useCallback(async () => {
+    const result = await api.uploadLocalRoutes()
+    const [routes, status] = await Promise.all([api.getSavedRoutes(), api.getRouteSyncStatus()])
+    setSavedRoutes(routes)
+    setRouteSyncStatus(status)
+    return result
+  }, [])
 
   // Build props for components
   const currentPos = sim.currentPosition
@@ -638,8 +637,8 @@ const App: React.FC = () => {
             country: (b as any).country || '',
             note: b.note || '',
             source: (b as any).source || 'cloud',
-            added_by: (b as any).added_by || '',
-            added_at: (b as any).added_at || '',
+            updated_by: (b as any).updated_by || '',
+            updated_at: (b as any).updated_at || '',
           }))}
           bookmarkCategories={bm.categories.map(c => c.name)}
           onBookmarkClick={(b: any) => handleSelectTarget(b.lat, b.lng, { label: b.name, source: 'bookmark' })}
@@ -659,15 +658,23 @@ const App: React.FC = () => {
           onBookmarkSync={bm.syncFromSheets}
           onBookmarkSetSyncConfig={bm.setSheetConfig}
           onBookmarkUploadLocal={bm.uploadLocal}
-          savedRoutes={savedRoutes.map(r => ({ id: r.id, name: r.name, waypoints: r.waypoints ?? [] }))}
+          savedRoutes={savedRoutes.map(r => ({
+            id: r.id,
+            name: r.name,
+            waypoints: r.waypoints ?? [],
+            updated_by: r.updated_by || '',
+            updated_at: r.updated_at || '',
+          }))}
           onRouteGpxImport={handleGpxImport}
           onRouteGpxExport={handleGpxExport}
-          onRouteShareCopy={handleRouteShareCopy}
-          onRoutePasteImport={handleRoutePasteImport}
           onRouteRename={handleRouteRename}
           onRouteDelete={handleRouteDelete}
           onRouteLoad={handleRouteLoad}
           onRouteSave={handleRouteSave}
+          routeSyncStatus={routeSyncStatus}
+          routeSyncing={routeSyncing}
+          onRouteSync={handleRouteSync}
+          onRouteUpload={handleRouteUpload}
           randomWalkRadius={randomWalkRadius}
           pauseRandomWalk={sim.pauseRandomWalk}
           onPauseRandomWalkChange={sim.setPauseRandomWalk}

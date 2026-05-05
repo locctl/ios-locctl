@@ -7,7 +7,7 @@ ROOT_DIR="$SCRIPT_DIR/.."
 PYTHON3_PATH="$ROOT_DIR/.venv/bin/python"
 
 if [ ! -x "$PYTHON3_PATH" ]; then
-    echo "Error: Python virtualenv not found. Run 'pnpm setup' first."
+    echo "Error: Python virtualenv not found. Run 'pnpm run bootstrap' first."
     exit 1
 fi
 

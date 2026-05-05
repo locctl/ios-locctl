@@ -2,10 +2,9 @@
  * ios-locctl — Sheets webhook for in-app bookmark uploads.
  *
  * What this does:
- *   The desktop app sends an array of bookmark objects via POST. This script
- *   appends each one as a row to the `bookmarks` tab, skipping any record
- *   whose lat,lng (rounded to 6 decimals) already exists, then returns a
- *   summary the app uses to update its UI.
+ *   The desktop app sends bookmark changes via POST. This script upserts
+ *   rows by lat,lng and can also delete rows, then returns a summary the
+ *   app uses to update its UI.
  *
  * Why a Web App instead of OAuth in the desktop app:
  *   The desktop app needs zero credentials this way — the webhook URL itself
@@ -34,13 +33,10 @@
  *   Version: New version → Deploy. The URL stays the same.
  */
 
-// Tab inside the Spreadsheet that holds the bookmark rows. Must match the
-// tab name configured in the desktop app (default "bookmarks").
-const TAB_NAME = 'bookmarks';
-
-// Column order in the sheet. The desktop app sends keys with these names;
-// changing this array changes both the row write and the dedup-key reads.
-const COLUMNS = ['name', 'lat', 'lng', 'country', 'category', 'added_by', 'added_at', 'note'];
+const BOOKMARKS_TAB = 'bookmarks';
+const ROUTES_TAB = 'routes';
+const BOOKMARK_COLUMNS = ['name', 'lat', 'lng', 'country', 'category', 'updated_by', 'updated_at', 'note'];
+const ROUTE_COLUMNS = ['name', 'waypoints_json', 'updated_by', 'updated_at', 'note'];
 
 function doPost(e) {
   let body;
@@ -50,28 +46,31 @@ function doPost(e) {
     return _json({ error: 'invalid JSON: ' + err.message }, 400);
   }
 
-  // Accept either a bare array (legacy: treat as upsert) or an envelope:
-  //   { action: 'upsert', items: [...] }
-  // Delete operations are intentionally not supported — local installs can
-  // only add/edit cloud rows, never remove them; cloud deletions happen in
-  // the Sheet UI directly.
-  let items;
+  let upserts = [];
+  let deletes = [];
+  const resource = body && typeof body === 'object' && body.resource === 'routes' ? 'routes' : 'bookmarks';
   if (Array.isArray(body)) {
-    items = body;
-  } else if (body && Array.isArray(body.items)) {
-    if (body.action && body.action !== 'upsert') {
+    upserts = body;
+  } else if (body && typeof body === 'object') {
+    if (body.action && !['upsert', 'sync'].includes(body.action)) {
       return _json({ error: `unsupported action: ${body.action}` }, 400);
     }
-    items = body.items;
+    upserts = Array.isArray(body.items) ? body.items : Array.isArray(body.upserts) ? body.upserts : [];
+    deletes = Array.isArray(body.deletes) ? body.deletes : [];
   } else {
-    return _json({ error: 'expected an array of bookmarks or { action, items }' }, 400);
+    return _json({ error: 'expected an array of bookmarks or sync payload' }, 400);
   }
 
-  const sheet = SpreadsheetApp.getActive().getSheetByName(TAB_NAME);
+  const sheet = SpreadsheetApp.getActive().getSheetByName(resource === 'routes' ? ROUTES_TAB : BOOKMARKS_TAB);
   if (!sheet) {
-    return _json({ error: `tab "${TAB_NAME}" not found in this spreadsheet` }, 404);
+    return _json({ error: `tab "${resource === 'routes' ? ROUTES_TAB : BOOKMARKS_TAB}" not found in this spreadsheet` }, 404);
   }
+  return resource === 'routes'
+    ? _handleRoutes(sheet, upserts, deletes)
+    : _handleBookmarks(sheet, upserts, deletes);
+}
 
+function _handleBookmarks(sheet, upserts, deletes) {
   // Build a coord-key → row index map of existing rows so we can rewrite a
   // matching row in place instead of appending a duplicate. Without this,
   // edits to cloud bookmarks (which keep their lat,lng) would be silently
@@ -91,9 +90,10 @@ function doPost(e) {
 
   const added = [];
   const updated = [];
+  const deleted = [];
   const skipped = [];
 
-  items.forEach((b) => {
+  upserts.forEach((b) => {
     const lat = parseFloat(b.lat);
     const lng = parseFloat(b.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
@@ -101,14 +101,14 @@ function doPost(e) {
       return;
     }
     const key = _coordKey(lat, lng);
-    const row = COLUMNS.map((c) => {
+    const row = BOOKMARK_COLUMNS.map((c) => {
       if (c === 'lat') return lat;
       if (c === 'lng') return lng;
       return b[c] || '';
     });
     const existingRow = existing.get(key);
     if (existingRow != null) {
-      sheet.getRange(existingRow, 1, 1, COLUMNS.length).setValues([row]);
+      sheet.getRange(existingRow, 1, 1, BOOKMARK_COLUMNS.length).setValues([row]);
       updated.push({ name: b.name, lat, lng });
     } else {
       sheet.appendRow(row);
@@ -117,12 +117,117 @@ function doPost(e) {
     }
   });
 
+  deletes.forEach((b) => {
+    const lat = parseFloat(b.lat);
+    const lng = parseFloat(b.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      skipped.push({ name: b.name, reason: 'invalid delete coord' });
+      return;
+    }
+    const existingRow = existing.get(_coordKey(lat, lng));
+    if (existingRow == null) {
+      skipped.push({ name: b.name, reason: 'delete target not found' });
+      return;
+    }
+    sheet.deleteRow(existingRow);
+    deleted.push({ name: b.name, lat, lng });
+    existing.clear();
+    const nowLastRow = sheet.getLastRow();
+    if (nowLastRow >= 2) {
+      const range = sheet.getRange(2, 2, nowLastRow - 1, 2).getValues();
+      range.forEach((r, i) => {
+        const rowLat = parseFloat(r[0]);
+        const rowLng = parseFloat(r[1]);
+        if (Number.isFinite(rowLat) && Number.isFinite(rowLng)) {
+          existing.set(_coordKey(rowLat, rowLng), i + 2);
+        }
+      });
+    }
+  });
+
   return _json({
     added: added.length,
     updated: updated.length,
+    deleted: deleted.length,
     skipped: skipped.length,
     added_items: added,
     updated_items: updated,
+    deleted_items: deleted,
+    skipped_items: skipped,
+  });
+}
+
+function _handleRoutes(sheet, upserts, deletes) {
+  const lastRow = sheet.getLastRow();
+  const existing = new Map();
+  if (lastRow >= 2) {
+    const names = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    names.forEach((r, i) => {
+      const name = String(r[0] || '').trim();
+      if (name) existing.set(name, i + 2);
+    });
+  }
+
+  const added = [];
+  const updated = [];
+  const deleted = [];
+  const skipped = [];
+
+  upserts.forEach((r) => {
+    const name = String(r.name || '').trim();
+    const waypoints = String(r.waypoints_json || '').trim();
+    if (!name) {
+      skipped.push({ name: '', reason: 'missing route name' });
+      return;
+    }
+    if (!waypoints) {
+      skipped.push({ name, reason: 'missing waypoints_json' });
+      return;
+    }
+    const row = ROUTE_COLUMNS.map((c) => r[c] || '');
+    const existingRow = existing.get(name);
+    if (existingRow != null) {
+      sheet.getRange(existingRow, 1, 1, ROUTE_COLUMNS.length).setValues([row]);
+      updated.push({ name });
+    } else {
+      sheet.appendRow(row);
+      added.push({ name });
+      existing.set(name, sheet.getLastRow());
+    }
+  });
+
+  deletes.forEach((r) => {
+    const name = String(r.name || '').trim();
+    if (!name) {
+      skipped.push({ name: '', reason: 'missing delete route name' });
+      return;
+    }
+    const existingRow = existing.get(name);
+    if (existingRow == null) {
+      skipped.push({ name, reason: 'delete target not found' });
+      return;
+    }
+    sheet.deleteRow(existingRow);
+    deleted.push({ name });
+    existing.clear();
+    const nowLastRow = sheet.getLastRow();
+    if (nowLastRow >= 2) {
+      const names = sheet.getRange(2, 1, nowLastRow - 1, 1).getValues();
+      names.forEach((row, i) => {
+        const rowName = String(row[0] || '').trim();
+        if (rowName) existing.set(rowName, i + 2);
+      });
+    }
+  });
+
+  return _json({
+    added: added.length,
+    updated: updated.length,
+    deleted: deleted.length,
+    skipped: skipped.length,
+    added_items: added,
+    updated_items: updated,
+    deleted_items: deleted,
     skipped_items: skipped,
   });
 }
@@ -133,9 +238,11 @@ function doGet() {
   // succeeded.
   return _json({
     ok: true,
-    message: 'ios-locctl webhook is alive. POST an array of bookmarks to upload them.',
-    expected_columns: COLUMNS,
-    target_tab: TAB_NAME,
+    message: 'ios-locctl webhook is alive. POST bookmark or route sync payloads to upload them.',
+    bookmarks_tab: BOOKMARKS_TAB,
+    routes_tab: ROUTES_TAB,
+    bookmarks_columns: BOOKMARK_COLUMNS,
+    routes_columns: ROUTE_COLUMNS,
   });
 }
 

@@ -294,7 +294,7 @@ const StatusBar: React.FC<StatusBarProps> = ({
             <div style={{ width: 1, height: 12, background: '#333' }} />
             <button
               onClick={onEditNickname}
-              title="設定 / 修改你的暱稱(用於 added_by)"
+              title="設定 / 修改你的暱稱(用於最後更新者)"
               style={{
                 background: 'transparent',
                 border: 'none',

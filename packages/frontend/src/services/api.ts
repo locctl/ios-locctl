@@ -193,8 +193,10 @@ export interface UploadResult {
   status: 'ok' | 'noop'
   added: number
   updated: number
+  deleted?: number
   skipped: number
   flipped_to_cloud: number
+  purged_local?: number
   skipped_items?: Array<{ name: string; reason: string }>
   message?: string
 }
@@ -236,7 +238,11 @@ export const planRoute = (start: any, end: any, profile: string) =>
 export const getSavedRoutes = () => request<any[]>('GET', '/api/route/saved')
 export const saveRoute = (route: any) => request<any>('POST', '/api/route/saved', route)
 export const deleteRoute = (id: string) => request<any>('DELETE', `/api/route/saved/${id}`)
-export const renameRoute = (id: string, name: string) => request<any>('PATCH', `/api/route/saved/${id}`, { name })
+export const renameRoute = (id: string, name: string, updated_by = '') =>
+  request<any>('PATCH', `/api/route/saved/${id}`, { name, updated_by })
+export const getRouteSyncStatus = () => request<SyncStatus>('GET', '/api/route/sync/status')
+export const syncRoutes = () => request<SyncStatus & { status: string; skipped_rows: string[] }>('POST', '/api/route/sync')
+export const uploadLocalRoutes = () => request<UploadResult>('POST', '/api/route/upload')
 
 // GPX import/export
 export async function importGpx(file: File): Promise<{ status: string; id: string; points: number }> {

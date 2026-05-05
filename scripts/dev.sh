@@ -7,7 +7,7 @@ BACKEND_DIR="$ROOT_DIR/packages/backend"
 VENV_PYTHON="$ROOT_DIR/.venv/bin/python"
 
 if [ ! -x "$VENV_PYTHON" ]; then
-    echo "Error: Python virtualenv not found. Run 'pnpm setup' first."
+    echo "Error: Python virtualenv not found. Run 'pnpm run bootstrap' first."
     exit 1
 fi
 

@@ -13,7 +13,7 @@
 
 ```bash
 # 1. 安裝依賴
-pnpm setup
+pnpm run bootstrap
 
 # 2. 開啟 Developer Mode（需暫時關閉密碼，完成後可設回）
 .venv/bin/pymobiledevice3 amfi enable-developer-mode
@@ -26,7 +26,7 @@ pnpm setup
 pnpm dev
 ```
 
-`pnpm setup` 會在專案根目錄建立 `.venv/`，並把後端 Python 依賴安裝在這個虛擬環境中，避免 macOS/Homebrew Python 的 PEP 668 限制。
+`pnpm run bootstrap` 會在專案根目錄建立 `.venv/`，並把後端 Python 依賴安裝在這個虛擬環境中，避免 macOS/Homebrew Python 的 PEP 668 限制。
 若要手動執行 Python CLI，請優先使用 `.venv/bin/...`，不要直接呼叫系統上的 `pymobiledevice3`。
 目前 backend 啟動時不會自動連線裝置；請在介面中手動選擇並連線。
 
