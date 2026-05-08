@@ -1,6 +1,6 @@
 {
   "name": "@ios-locctl/cli",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "iOS location control CLI",
   "main": "index.js",
   "scripts": {

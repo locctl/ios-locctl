@@ -1,6 +1,6 @@
 {
   "name": "@ios-locctl/frontend",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "iOS Virtual Location Simulator",
   "author": "mars",
   "main": "electron/main.js",
